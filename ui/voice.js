@@ -195,7 +195,7 @@ const ADV = [
     ['pauses.question', 'Extra pause after a question', 'num', SECS],
     ['pauses.paragraph', 'Extra pause at an empty line', 'num', SECS],
     ['pauses.end', 'Silence at the very end', 'num', SECS],
-    ['pauses.lineVary', 'Vary the pause a little (0.20–0.30 s), like a radio host', 'toggle'],
+    ['pauses.lineVary', 'Vary the pause a little (0.20 to 0.30 s), like a radio host', 'toggle'],
     ['pace.on', 'Say questions and exclamations a little faster', 'toggle'],
     ['pace.question', 'How much faster', 'range', { min: 1, max: 1.2, step: 0.005, unit: '×', when: 'pace.on' }],
     ['kokoro.trim', 'Let the voice cut its own silence at the ends', 'toggle'],
@@ -556,15 +556,16 @@ function meterPlayer(url, duration) {
     const at = duration ? audio.currentTime / duration : 0;
     const bars = Math.max(20, Math.floor(W / 4));
     const mid = H / 2;
-    const dim = css('--lcd-dim');
+    const dim = css('--meter-off');
+    const on = css('--meter-on');
     for (let i = 0; i < bars; i++) {
       const p = peaks && peaks.length ? peaks[Math.floor((i / bars) * peaks.length)] : 0.04;
       const h = Math.max(1, Math.sqrt(p) * (H / 2 - 3));
-      c.fillStyle = i / bars < at ? '#fff3d6' : dim;
+      c.fillStyle = i / bars < at ? on : dim;
       c.fillRect(i * 4 + 1, mid - h, 2, h * 2);
     }
     if (at > 0) {
-      c.fillStyle = '#fff3d6';
+      c.fillStyle = on;
       c.fillRect(Math.min(W - 2, at * W), 2, 2, H - 4);
     }
   }

@@ -9,3 +9,4 @@ voiceovers/
 models/
 .venv/
 .mrb-version.json
+.claude/

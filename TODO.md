@@ -24,7 +24,13 @@ Still to check:
       right = the call) instead of mixing them. That gives "Me" vs "Others" for free and makes item 2
       much easier. It is still one file, so the one-audio-file rule holds.
 
-## 2. Tell speakers apart in Record recordings — **next to build**
+## 2. Tell speakers apart in Record recordings — **Done** (22 Nov)
+
+Built with sherpa-onnx in Node (`lib/diarize.js`): pyannote segmentation-3.0 plus the 3D-Speaker CAM++ voice
+model, chosen with `test/bench-diarization.js` on four AMI meetings (first 10 minutes each, no collar, overlap
+included): CAM++ 21.2 % DER, ERes2Net 23.1, TitaNet-small 24.8, WeSpeaker CAM++ 29.6, ResNet34 32.6.
+Transcripts say Speaker 1, 2, ...; click a name to rename it everywhere. "How many people will talk?" next to
+Record fixes the count when known. Still open: the two-channel split below, and voiceprints.
 
 **Goal:** a "Record" transcript says *Speaker 1 / Speaker 2 / …*, and you rename each one
 once (e.g. "Speaker 2 → Haider") and the name carries through the whole transcript.

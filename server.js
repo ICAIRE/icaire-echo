@@ -11,6 +11,7 @@ const { ts } = require('./lib/timeline');
 const whisper = require('./lib/whisper');
 const kokoro = require('./lib/kokoro');
 const { Updater, RESTART_CODE } = require('./lib/updater');
+const diarize = require('./lib/diarize');
 const { HAS_CHROME } = require('./lib/session');
 const ffmpegPath = require('ffmpeg-static');
 
@@ -78,7 +79,11 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
     const w = await whisperDetect();
     if (!w.available) throw Object.assign(new Error(w.reason || 'Whisper is not available.'), { code: 400 });
     const model = w.models.find((m) => m.name === modelName) || w.models[0];
-    job = new whisper.TranscribeJob({ id, audio: path.join(dir, 'audio.wav'), out: path.join(dir, 'whisper.json'), engine: w.engine, device: w.device, model, language });
+    // a recording with no speaker log (made with Record) gets one from the voices; a bot recording has Meet's
+    let meta = {};
+    try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch {}
+    const separate = meta.kind === 'local' && meta.people !== 1 && !fs.existsSync(path.join(dir, 'speakers.json')) && diarize.engineReady() && process.env.MRB_NO_SPEAKERS !== '1';
+    job = new whisper.TranscribeJob({ id, audio: path.join(dir, 'audio.wav'), out: path.join(dir, 'whisper.json'), engine: w.engine, device: w.device, model, language, separate, people: meta.people || null });
     job.on('update', broadcast);
     const mine = job;
     mine.run().then(() => {
@@ -145,7 +150,10 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
     });
 
   function sendFile(req, res, file) {
-    const stat = fs.statSync(file);
+    let stat;
+    try { stat = fs.statSync(file); } catch { return json(res, 404, { error: 'not found' }); }
+    if (!stat.isFile() || path.basename(file).startsWith('.')) return json(res, 404, { error: 'not found' });
+    const stream = (opts) => fs.createReadStream(file, opts).on('error', () => res.destroy());
     const type = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
     const range = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
     if (range) {
@@ -156,10 +164,10 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
         return res.end();
       }
       res.writeHead(206, { 'content-type': type, 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${stat.size}`, 'content-length': end - start + 1 });
-      return fs.createReadStream(file, { start, end }).pipe(res);
+      return stream({ start, end }).pipe(res);
     }
     res.writeHead(200, { 'content-type': type, 'accept-ranges': 'bytes', 'content-length': stat.size, 'cache-control': 'no-store' });
-    fs.createReadStream(file).pipe(res);
+    stream().pipe(res);
   }
 
   const local = new Map(); // microphone recordings in progress: id -> { startedAt, mime }
@@ -219,6 +227,14 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
     // Only answer to this machine's own browser (blocks DNS-rebinding and cross-site requests).
     const host = (req.headers.host || '').replace(/:\d+$/, '');
     if (!['localhost', '127.0.0.1', '[::1]'].includes(host)) return json(res, 403, { error: 'forbidden host' });
+    // a page on another site (even one only loading a picture or a sound from here) gets nothing
+    if (req.headers['sec-fetch-site'] === 'cross-site') return json(res, 403, { error: 'forbidden' });
+    // the panel loads nothing from elsewhere, runs only its own scripts, and cannot be framed by another page
+    res.setHeader('content-security-policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+    res.setHeader('x-content-type-options', 'nosniff');
+    res.setHeader('referrer-policy', 'no-referrer');
+    res.setHeader('x-frame-options', 'DENY');
+    res.setHeader('cross-origin-resource-policy', 'same-origin');
     if (req.method !== 'GET' && req.headers['x-mrb'] !== '1') return json(res, 403, { error: 'missing header' });
 
     const url = new URL(req.url, 'http://localhost');
@@ -440,7 +456,8 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
         const dir = path.join(outRoot, id);
         fs.mkdirSync(dir, { recursive: true });
         const body = await readBody(req);
-        local.set(id, { startedAt: new Date().toISOString(), mime: String(body.mime || 'audio/webm').slice(0, 80), source: body.source === 'microphone+computer' ? 'microphone+computer' : 'microphone' });
+        const people = Math.round(Number(body.people)); // how many people talk, when the person said so
+        local.set(id, { startedAt: new Date().toISOString(), mime: String(body.mime || 'audio/webm').slice(0, 80), source: body.source === 'microphone+computer' ? 'microphone+computer' : 'microphone', people: people >= 1 && people <= 20 ? people : null });
         fs.writeFileSync(path.join(dir, 'audio.part'), '');
         return json(res, 200, { id });
       }
@@ -465,7 +482,7 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
         if (!ok) return json(res, 500, { error: 'Could not convert the recording to audio.wav. The raw file is kept as audio.part.' });
         fs.unlinkSync(part);
         const durationSec = Math.max(0, Number(body.durationMs) || 0) / 1000;
-        fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ kind: 'local', source: rec.source, startedAt: rec.startedAt, durationSec }, null, 2));
+        fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ kind: 'local', source: rec.source, startedAt: rec.startedAt, durationSec, people: rec.people }, null, 2));
         let transcribe = null;
         if (body.transcribe !== false) {
           try { transcribe = await startTranscription(m[1], {}); } catch (e) { transcribe = { error: e.message }; }
@@ -480,6 +497,20 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
         json(res, 200, r);
         if (r.status === 'updated') restart();
         return;
+      }
+      // name a voice once ("Speaker 2" -> "Haider"); the transcript follows
+      if (req.method === 'POST' && (m = /^\/api\/rename\/([\w-]+)$/.exec(p))) {
+        const dir = recDir(m[1]);
+        if (!dir || !fs.existsSync(path.join(dir, 'speakers.json'))) return json(res, 404, { error: 'This recording has no speakers to name.' });
+        const body = await readBody(req);
+        try {
+          diarize.rename(dir, String(body.from || ''), String(body.to || ''));
+        } catch (e) {
+          return json(res, 400, { error: e.message });
+        }
+        const src = ['whisper.json', 'whisper.srt', 'whisper.vtt'].map((f) => path.join(dir, f)).find((f) => fs.existsSync(f));
+        if (src) writeTranscript(dir, src);
+        return json(res, 200, { ok: true });
       }
       if (req.method === 'POST' && p === '/api/transcribe-cancel') {
         if (!job || !job.active) return json(res, 409, { error: 'Nothing is being transcribed.' });

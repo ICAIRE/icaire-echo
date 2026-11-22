@@ -27,6 +27,7 @@ The large files download from inside the app the first time you need them:
 |---|---|
 | Voices, for Voice-over | 354 MB |
 | Whisper model, for Transcribe | 1.6 GB (3.1 GB on a PC with an NVIDIA graphics card) |
+| Voice models that tell speakers apart, for **Record** | 32 MB |
 | Japanese or Chinese pronunciation, only if you use those voices | 29 MB / 20 MB |
 
 ## Use it
@@ -43,6 +44,10 @@ Google Chrome.
 the people in my call** on to capture the call's sound as well: when the browser asks what to share,
 pick **Entire screen** and turn on **Also share system audio** (on a Mac, pick the meeting's tab and
 keep **Also share tab audio** on).
+
+The transcript of a **Record** recording says who spoke as *Speaker 1*, *Speaker 2* and so on: the app
+tells the voices apart on this computer. Click a speaker's name on the recording to give it a real
+one; the whole transcript follows.
 
 **Make a voice-over.** Open **Voice-over**, paste your script, choose a voice and press **Create
 voice-over**. Each line of the script is read in one go, and an empty line makes a longer pause.

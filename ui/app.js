@@ -124,9 +124,9 @@ function drawWave(canvas, values, end, now) {
   const start = now - WAVE_SEC;
   const X = (t) => ((t - start) / WAVE_SEC) * (W - 2);
   // centre line
-  c.fillStyle = css('--lcd-dim');
+  c.fillStyle = css('--wave-label');
   c.fillRect(0, mid, W, 1);
-  const ink = css('--lcd-ink');
+  const ink = css('--wave-ink');
   const barW = Math.max(1.5, Math.min(3, (W / (WAVE_SEC * 10)) * 0.62));
   c.fillStyle = ink;
   for (let i = values.length - 1; i >= 0; i--) {
@@ -145,11 +145,11 @@ function drawWave(canvas, values, end, now) {
   }
   c.globalAlpha = 1;
   // playhead
-  c.fillStyle = '#fff3d6';
+  c.fillStyle = css('--wave-mark');
   c.fillRect(W - 2, 2, 2, mid * 2 - 4);
   // time marks
-  c.font = '12px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif';
-  c.fillStyle = '#9a8f7c';
+  c.font = '12px ' + getComputedStyle(document.body).fontFamily;
+  c.fillStyle = css('--wave-label');
   c.textBaseline = 'bottom';
   const every = WAVE_SEC > 20 ? 10 : 5;
   for (let s = every; s <= WAVE_SEC; s += every) {
@@ -191,12 +191,12 @@ function drawLanes(canvas, lanes, segments, opt) {
   const x1 = W - (live ? 4 : 2);
   const span = Math.max(1, end - start);
   const X = (t) => x0 + ((t - start) / span) * (x1 - x0);
-  const seam = css('--seam');
+  const seam = css('--line');
   const faint = css('--ink-3');
   const text = css('--ink');
   const track = css('--track');
   const lanesBottom = 2 + lanes.length * (laneH + gap);
-  const font = '"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif';
+  const font = getComputedStyle(document.body).fontFamily;
 
   const steps = [5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
   const step = steps.find((s) => span / s <= 8) || 3600;
@@ -480,7 +480,7 @@ async function startLocal() {
   const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', ''].find((m) => !m || (window.MediaRecorder && MediaRecorder.isTypeSupported(m)));
   let id;
   try {
-    ({ id } = await api('/api/local/start', { mime, source: shared ? 'microphone+computer' : 'microphone' }));
+    ({ id } = await api('/api/local/start', { mime, source: shared ? 'microphone+computer' : 'microphone', people: Number($('localPeople').value) || null }));
   } catch (e) {
     stream.getTracks().forEach((t) => t.stop());
     if (shared) shared.getTracks().forEach((t) => t.stop());
@@ -588,10 +588,19 @@ function renderRecording(r) {
   const when = r.startedAt ? new Date(r.startedAt) : null;
   node.querySelector('.rec-kind').textContent = isLocal ? 'Microphone recording' : 'Google Meet';
   node.querySelector('.rec-when').textContent = when ? when.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : r.id;
-  node.querySelector('.rec-facts').textContent = isLocal
+  node.querySelector('.rec-facts').textContent = isLocal && !r.speakers.length
     ? length(r.durationSec)
     : [length(r.durationSec), plural(r.speakers.length, 'speaker'), plural(r.segments, 'speaking turn')].join(' · ');
-  node.querySelector('.rec-speakers').replaceChildren(...r.speakers.map((n) => el('span', { class: 'chip', style: `--c:${colorOf('name:' + n)}` }, n)));
+  // voices told apart from a Record recording can be named once; the whole transcript follows
+  const renamable = isLocal && r.speakers.length;
+  node.querySelector('.rec-speakers').replaceChildren(
+    ...r.speakers.map((n) =>
+      renamable
+        ? el('button', { class: 'chip chip-rename', type: 'button', title: `Name ${n}`, style: `--c:${colorOf('name:' + n)}`, onclick: () => renameSpeaker(r.id, n) }, n)
+        : el('span', { class: 'chip', style: `--c:${colorOf('name:' + n)}` }, n)
+    ),
+    ...(renamable ? [el('span', { class: 'hint chip-hint' }, 'Click a name to change it')] : [])
+  );
 
   const files = [...r.files].sort((a, b) => (PRIMARY.indexOf(a.name) + 1 || 99) - (PRIMARY.indexOf(b.name) + 1 || 99));
   node.querySelector('.rec-files').replaceChildren(
@@ -627,6 +636,9 @@ function renderRecording(r) {
   const hasTranscript = r.files.some((f) => f.name === 'transcript.txt');
   const txBtn = node.querySelector('.act-transcribe');
   txBtn.textContent = hasTranscript ? 'Transcribe again' : 'Transcribe';
+  // one primary button per card: once there is a transcript, Copy is the main action
+  txBtn.classList.toggle('key-primary', !hasTranscript);
+  txBtn.classList.toggle('key-quiet', hasTranscript);
   txBtn.classList.toggle('key-quiet', hasTranscript);
   txBtn.classList.toggle('key-primary', !hasTranscript);
   txBtn.hidden = !hasAudio;
@@ -643,7 +655,7 @@ function renderRecording(r) {
     }
   });
   node.querySelector('.tx-cancel').addEventListener('click', () => api('/api/transcribe-cancel').catch(() => {}));
-  if (hasTranscript) loadTranscript(node, r.id, isLocal);
+  if (hasTranscript) loadTranscript(node, r.id, isLocal && !r.speakers.length);
   syncTxButtons(node);
 
   const fileInput = node.querySelector('.act-merge input');
@@ -743,7 +755,7 @@ function showWhisperSetup(s) {
 
 function syncTxButtons(node) {
   const b = node.querySelector('.act-transcribe');
-  const busy = tx && ['loading', 'running', 'merging'].includes(tx.status);
+  const busy = tx && ['loading', 'separating', 'running', 'merging'].includes(tx.status);
   b.disabled = !!busy || (whisper && !whisper.available);
   b.title = whisper && !whisper.available ? whisper.reason || '' : busy && tx.id !== node.dataset.id ? 'Another recording is being transcribed' : '';
 }
@@ -751,6 +763,17 @@ function syncTxButtons(node) {
 const LINE = /^\[(\d\d:\d\d:\d\d) - (\d\d:\d\d:\d\d)\] (.*)$/;
 // names can contain brackets themselves: "Sara (2) (over: Ali (3)): text"
 const WHO = /^(.+?)(?: \(over: (.*?)\))?: (.*)$/;
+async function renameSpeaker(id, from) {
+  const to = prompt(`Who is ${from}?`, /^Speaker \d+$/.test(from) ? '' : from);
+  if (!to || !to.trim() || to.trim() === from) return;
+  try {
+    await api('/api/rename/' + id, { from, to: to.trim() });
+    refreshRecording(id);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
 async function loadTranscript(node, id, isLocal) {
   const box = node.querySelector('.rec-transcript');
   const text = await fetch(`/rec/${id}/transcript.txt`, { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).catch(() => '');
@@ -827,21 +850,24 @@ function showTx(t, started) {
   const node = recNode(t.id);
   if (!node) return;
   const prog = node.querySelector('.tx-progress');
-  const active = ['loading', 'running', 'merging'].includes(t.status);
+  const active = ['loading', 'separating', 'running', 'merging'].includes(t.status);
   prog.hidden = !active;
   if (active) {
     const model = t.model ? `Whisper ${t.model}` : 'Whisper';
     const where = t.device === 'cpu' ? 'the processor' : (whisper && whisper.gpu) || 'the graphics card';
-    prog.dataset.phase = t.status;
-    const pct = t.status === 'loading' ? 0 : t.percent;
-    node.querySelector('.tx-pct').textContent = t.status === 'loading' ? '…' : `${Math.floor(pct)}%`;
+    const waiting = t.status === 'loading' || t.status === 'separating';
+    prog.dataset.phase = waiting ? 'loading' : t.status;
+    const pct = waiting ? 0 : t.percent;
+    node.querySelector('.tx-pct').textContent = waiting ? '…' : `${Math.floor(pct)}%`;
     node.querySelector('.tx-label').textContent =
-      t.status === 'loading'
+      t.status === 'separating'
+        ? 'Telling the voices apart…'
+        : t.status === 'loading'
         ? `Loading ${model}…`
         : t.status === 'merging'
           ? 'Adding the speaker names…'
           : `Writing the transcript: ${mmss(t.at)} of ${mmss(t.duration)} done` + (t.etaSec != null && t.percent > 2 ? `, about ${mmss(t.etaSec)} left` : '') + ` (${model} on ${where})`;
-    node.querySelector('.tx-track > span').style.transform = t.status === 'loading' ? '' : `scaleX(${(pct / 100).toFixed(4)})`;
+    node.querySelector('.tx-track > span').style.transform = waiting ? '' : `scaleX(${(pct / 100).toFixed(4)})`;
     node.querySelector('.tx-track').setAttribute('aria-valuenow', Math.floor(pct));
   }
   const changed = !prev || prev.id !== t.id || prev.status !== t.status;

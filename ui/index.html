@@ -4,27 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Meet Recorder</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='9' fill='%23d7322a'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f2a38'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%238dc63f'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/ui/tokens.css">
   <link rel="stylesheet" href="/ui/style.css">
+  <script src="/ui/theme.js"></script>
 </head>
 <body data-status="idle">
-<!--
-THESIS: The panel is an interpreter's booth console, not a dashboard of cards: one lamp says whether you are live, one key per
-  person lights when they speak, and the meeting's sound scrolls past like a voice recorder. Refuses tiled dark stat panels.
-OWN-WORLD: Light putty hardware face with hairline seams, charcoal keys with a one-pixel travel edge, a recessed black LCD
-  window with amber digits for time, a red ON AIR lamp as the only red. Deck, sound meter and booth share one face split by hairline seams. System UI type; tabular figures for every number.
-STORY: A teammate sees at a glance whether the bot is in a meeting, recording, and for how long; they can send it to a Meet
-  link or just press Record for this computer's microphone; afterwards they open a recording and copy a transcript with names.
-  In the Voice-over tab they paste a script, pick one of three voice keys (Presenter recommended) and press Create.
-FIRST VIEWPORT: Top strip with lamp + state + LCD clock and a two-key tab tray (Transcribe, Voice-over). Voice-over: script well,
-  voice keys, then one Create key under both; results play in the black meter window; every setting hides under Advanced.
-  Transcribe: Idle: two modules, "Send the bot to a Google Meet" (link slot, Join key)
-  and "Record here" (round red key). Live: deck (lamp, LCD clock, Stop), full-width waveform, delegate keys, booth window.
-FORM: Interpreter's booth console, grounded list position 5, staging: console strip + delegate key row; seed d3411ad8.
-FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
--->
+
   <header class="top">
-    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Meet Recorder</div>
+    <div class="brand">
+      <img class="lockup-light" src="/ui/icaire-lockup.png" alt="International Center for AI Research and Ethics, under the auspices of UNESCO" width="480" height="215">
+      <img class="lockup-dark" src="/ui/icaire-lockup-white.png" alt="" width="480" height="215">
+      <span class="brand-name">Meet Recorder</span>
+    </div>
     <nav class="tabs" role="tablist" aria-label="Tools">
       <a class="tab-btn" id="tabBtnTranscribe" role="tab" href="#transcribe" aria-controls="tabTranscribe">Transcribe</a>
       <a class="tab-btn" id="tabBtnVoice" role="tab" href="#voice" aria-controls="tabVoice">Voice-over</a>
@@ -50,7 +42,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 
       <div class="modules">
         <form id="joinForm" class="module module-meet" autocomplete="off">
-          <h2>Send the bot to a Google Meet</h2>
+          <h2>Or send the bot to a Google Meet</h2>
           <label class="field field-url">
             <span>Meet link</span>
             <input id="url" type="text" inputmode="url" placeholder="meet.google.com/abc-defg-hij" required spellcheck="false">
@@ -76,7 +68,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
         </form>
 
         <section class="module module-local" aria-labelledby="localHead">
-          <h2 id="localHead">Or record here</h2>
+          <h2 id="localHead">Record here</h2>
           <p class="module-text">No bot needed. Records your microphone, and the other people in your call too, then writes the transcript when you stop.</p>
           <button id="localBtn" class="rec-key" type="button" aria-describedby="localHint">
             <span class="rec-key-dot" aria-hidden="true"></span>
@@ -85,6 +77,15 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
           <label class="check">
             <input id="localCall" type="checkbox" checked>
             <span>Also record the people in my call</span>
+          </label>
+          <label class="people-count">
+            <span>How many people will talk?</span>
+            <select id="localPeople">
+              <option value="">Not sure</option>
+              <option value="1">Just me</option>
+              <option value="2">2</option><option value="3">3</option><option value="4">4</option>
+              <option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option>
+            </select>
           </label>
           <p id="localHint" class="hint"></p>
           <p class="form-error" id="localError" role="alert"></p>
@@ -96,7 +97,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
     <section id="live" class="live" hidden aria-label="Recording now">
       <div class="deck">
         <div class="deck-state">
-          <span class="onair-lens" aria-hidden="true"><span class="lamp"></span><span class="lens-label">ON AIR</span></span>
+          <span class="onair-lens" aria-hidden="true"><span class="lamp"></span><span class="lens-label">REC</span></span>
           <div>
             <div id="statusTitle" class="status-title">Starting…</div>
             <div id="statusSub" class="status-sub"></div>
