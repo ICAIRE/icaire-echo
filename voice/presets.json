@@ -1,0 +1,164 @@
+{
+  "about": "Voice-over presets and every Kokoro voice. The three presets copy, value for value, the voices of the Ideas City presentation (ideas-city-walkthrough: src/walk_tts.py, src/walk_say.py, src/walk_music.py, voice/build.py) and its Manara FM radio hosts (city-kits-demo/voice/radio.py, radio_script.py). voice/tts.py reads this file; the panel shows it.",
+
+  "model": {
+    "files": [
+      { "name": "kokoro-v1.0.onnx", "bytes": 325532387, "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx" },
+      { "name": "voices-v1.0.bin", "bytes": 28214398, "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin" }
+    ]
+  },
+
+  "languages": [
+    { "code": "en-us", "prefix": "a", "name": "English (American)" },
+    { "code": "en-gb", "prefix": "b", "name": "English (British)" },
+    { "code": "es", "prefix": "e", "name": "Spanish" },
+    { "code": "fr-fr", "prefix": "f", "name": "French" },
+    { "code": "hi", "prefix": "h", "name": "Hindi" },
+    { "code": "it", "prefix": "i", "name": "Italian" },
+    { "code": "ja", "prefix": "j", "name": "Japanese" },
+    { "code": "pt-br", "prefix": "p", "name": "Portuguese (Brazil)" },
+    { "code": "cmn", "prefix": "z", "name": "Chinese (Mandarin)" }
+  ],
+
+  "voices": [
+    { "id": "af_heart", "name": "Heart", "best": true },
+    { "id": "af_bella", "name": "Bella", "best": true },
+    { "id": "af_nicole", "name": "Nicole" },
+    { "id": "af_aoede", "name": "Aoede" },
+    { "id": "af_kore", "name": "Kore" },
+    { "id": "af_sarah", "name": "Sarah" },
+    { "id": "af_alloy", "name": "Alloy" },
+    { "id": "af_nova", "name": "Nova" },
+    { "id": "af_sky", "name": "Sky" },
+    { "id": "af_jessica", "name": "Jessica" },
+    { "id": "af_river", "name": "River" },
+    { "id": "am_fenrir", "name": "Fenrir", "best": true },
+    { "id": "am_michael", "name": "Michael", "best": true },
+    { "id": "am_puck", "name": "Puck" },
+    { "id": "am_echo", "name": "Echo" },
+    { "id": "am_eric", "name": "Eric" },
+    { "id": "am_liam", "name": "Liam" },
+    { "id": "am_onyx", "name": "Onyx" },
+    { "id": "am_santa", "name": "Santa" },
+    { "id": "am_adam", "name": "Adam" },
+    { "id": "bf_emma", "name": "Emma", "best": true },
+    { "id": "bf_isabella", "name": "Isabella" },
+    { "id": "bf_alice", "name": "Alice" },
+    { "id": "bf_lily", "name": "Lily" },
+    { "id": "bm_george", "name": "George", "best": true },
+    { "id": "bm_fable", "name": "Fable" },
+    { "id": "bm_lewis", "name": "Lewis" },
+    { "id": "bm_daniel", "name": "Daniel" },
+    { "id": "ef_dora", "name": "Dora", "best": true },
+    { "id": "em_alex", "name": "Alex", "best": true },
+    { "id": "em_santa", "name": "Santa" },
+    { "id": "ff_siwis", "name": "Siwis", "best": true },
+    { "id": "hf_alpha", "name": "Alpha", "best": true },
+    { "id": "hf_beta", "name": "Beta" },
+    { "id": "hm_omega", "name": "Omega", "best": true },
+    { "id": "hm_psi", "name": "Psi" },
+    { "id": "if_sara", "name": "Sara", "best": true },
+    { "id": "im_nicola", "name": "Nicola", "best": true },
+    { "id": "jf_alpha", "name": "Alpha", "best": true },
+    { "id": "jf_gongitsune", "name": "Gongitsune" },
+    { "id": "jf_nezumi", "name": "Nezumi" },
+    { "id": "jf_tebukuro", "name": "Tebukuro" },
+    { "id": "jm_kumo", "name": "Kumo", "best": true },
+    { "id": "pf_dora", "name": "Dora", "best": true },
+    { "id": "pm_alex", "name": "Alex", "best": true },
+    { "id": "pm_santa", "name": "Santa" },
+    { "id": "zf_xiaoxiao", "name": "Xiaoxiao", "best": true },
+    { "id": "zf_xiaobei", "name": "Xiaobei" },
+    { "id": "zf_xiaoni", "name": "Xiaoni" },
+    { "id": "zf_xiaoyi", "name": "Xiaoyi" },
+    { "id": "zm_yunxi", "name": "Yunxi", "best": true },
+    { "id": "zm_yunjian", "name": "Yunjian" },
+    { "id": "zm_yunxia", "name": "Yunxia" },
+    { "id": "zm_yunyang", "name": "Yunyang" }
+  ],
+
+  "samples": {
+    "en-us": "Hello, and welcome. This is how I sound when I read your script.",
+    "en-gb": "Hello, and welcome. This is how I sound when I read your script.",
+    "es": "Hola y bienvenidos. Así sueno cuando leo tu texto.",
+    "fr-fr": "Bonjour et bienvenue. Voici ma voix quand je lis votre texte.",
+    "hi": "नमस्ते, और स्वागत है। जब मैं आपकी स्क्रिप्ट पढ़ती हूँ तो ऐसी सुनाई देती हूँ।",
+    "it": "Ciao e benvenuti. Ecco come suono quando leggo il vostro testo.",
+    "ja": "こんにちは、ようこそ。これがあなたの原稿を読むときの私の声です。",
+    "pt-br": "Olá e bem-vindos. É assim que eu soo quando leio o seu texto.",
+    "cmn": "大家好，欢迎收听。这就是我朗读你的稿子时的声音。"
+  },
+
+  "defaults": {
+    "voice": "af_heart",
+    "blend": { "on": false, "voice": "af_bella", "mix": 0.25 },
+    "lang": "auto",
+    "speed": 0.94,
+    "split": "lines",
+    "kokoro": { "trim": true, "sentencePause": 0.25, "clausePause": 0.1, "continuous": false },
+    "pauses": { "sentence": 0.42, "number": 0.6, "question": 0.3, "paragraph": 1.0, "end": 0.6, "lineVary": false },
+    "spellings": [["ICAIRE", "I care"], ["NASA", "Nassa"]],
+    "names": [
+      ["Manara", "mænˈɑːɹə", "manˈɑːɹə"],
+      ["UNESCO", "juːnˈɛskoʊ", "juːnˈɛskəʊ"]
+    ],
+    "pace": { "on": false, "question": 1.015 },
+    "edges": { "on": false, "threshold": 0.004, "before": 0.045, "after": 0.14, "fade": 0.012 },
+    "closeGaps": { "on": false, "keepBelow": 0.05, "shortUpTo": 0.16, "shortTo": 0.035, "longest": 0.19 },
+    "breaths": { "on": false, "minWords": 11, "length": 0.27, "level": 0.0034 },
+    "rumble": { "on": false, "hz": 90 },
+    "room": { "on": false, "wet": 0.11, "delay": 0.012, "decay": 0.036 },
+    "level": { "on": false, "target": 0.085 },
+    "peak": { "on": false, "limit": 0.89 },
+    "music": { "on": false, "under": -24, "pause": -13, "intro": 6.0, "tail": 6.0 },
+    "export": { "highpass": 70, "loudnorm": true, "I": -16, "TP": -3, "LRA": 11, "format": "mp3" }
+  },
+
+  "presets": [
+    {
+      "id": "presenter",
+      "name": "Presenter",
+      "about": "Calm, warm narrator. The voice of the Ideas City presentation.",
+      "recommended": true,
+      "settings": {}
+    },
+    {
+      "id": "layla",
+      "name": "Layla",
+      "about": "Quick, warm radio host from Manara FM.",
+      "settings": {
+        "voice": "af_heart",
+        "speed": 0.97,
+        "pauses": { "sentence": 0.25, "number": 0, "question": 0, "paragraph": 0.25, "end": 0.3, "lineVary": true },
+        "pace": { "on": true, "question": 1.015 },
+        "edges": { "on": true },
+        "closeGaps": { "on": true },
+        "breaths": { "on": true },
+        "rumble": { "on": true },
+        "room": { "on": true },
+        "level": { "on": true },
+        "peak": { "on": true },
+        "export": { "loudnorm": false }
+      }
+    },
+    {
+      "id": "omar",
+      "name": "Omar",
+      "about": "Easy-going radio host from Manara FM.",
+      "settings": {
+        "voice": "am_fenrir",
+        "speed": 0.97,
+        "pauses": { "sentence": 0.25, "number": 0, "question": 0, "paragraph": 0.25, "end": 0.3, "lineVary": true },
+        "pace": { "on": true, "question": 1.015 },
+        "edges": { "on": true },
+        "closeGaps": { "on": true },
+        "breaths": { "on": true },
+        "rumble": { "on": true },
+        "room": { "on": true },
+        "level": { "on": true },
+        "peak": { "on": true },
+        "export": { "loudnorm": false }
+      }
+    }
+  ]
+}

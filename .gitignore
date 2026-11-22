@@ -1,0 +1,11 @@
+node_modules/
+bot-profile/
+recordings/
+test/out/
+*.part
+.impeccable/
+__pycache__/
+voiceovers/
+models/
+.venv/
+.mrb-version.json
