@@ -158,3 +158,12 @@ for (const [scenario, pattern] of [
     fs.rmSync(outRoot, { recursive: true, force: true });
   });
 }
+
+test('talk mode: you talk in the bot window, your microphone is in the recording', async () => {
+  // Chrome's fake microphone plays a steady beep; the fake meeting's own people stay silent here
+  const { snap, statuses, run } = await runBot({ admitDelayMs: 300, endAfterMs: 6000, schedule: [], tones: [] }, { talk: true, testMedia: true, show: false });
+  assert.equal(snap.status, 'done', statuses.join(' > ') + ' ' + (snap.error || ''));
+  assert.ok(run.logs.some((l) => /Your microphone is in the recording/.test(l.msg)), run.logs.map((l) => l.msg).join('\n'));
+  const a = probe(path.join(snap.outDir, 'audio.wav'));
+  assert.ok(a.meanDb > -60, `the microphone is heard in audio.wav (mean ${a.meanDb} dB)`);
+});

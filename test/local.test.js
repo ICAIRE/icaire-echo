@@ -127,6 +127,18 @@ test('record here with the call: microphone and the shared call sound land in on
     await panel.evaluate(() => window.__shared.getAudioTracks()[0].dispatchEvent(new Event('ended')));
     await panel.waitForFunction(() => /only your microphone/.test(document.getElementById('statusSub').textContent));
     await panel.waitForTimeout(1000);
+    // pause: the clock stands still and nothing is recorded; resume carries on in the same recording
+    const wallStart = Date.now();
+    await panel.click('#pauseBtn');
+    assert.equal(await panel.textContent('#statusTitle'), 'Paused');
+    assert.equal(await panel.textContent('#pauseBtn'), 'Resume');
+    const clockAtPause = await panel.textContent('#clock');
+    await panel.waitForTimeout(3000);
+    assert.equal(await panel.textContent('#clock'), clockAtPause, 'the clock stands still while paused');
+    await panel.click('#pauseBtn');
+    assert.equal(await panel.textContent('#pauseBtn'), 'Pause');
+    await panel.waitForTimeout(1500);
+    const pausedWall = (Date.now() - wallStart) / 1000;
     await panel.click('#stopBtn');
     await panel.waitForSelector('#done:not([hidden])', { timeout: 30000 });
     assert.match(await panel.textContent('#done'), /microphone and the call/);
@@ -134,6 +146,10 @@ test('record here with the call: microphone and the shared call sound land in on
     const id = fs.readdirSync(outRoot).find((d) => /^\d{4}-/.test(d));
     const meta = JSON.parse(fs.readFileSync(path.join(outRoot, id, 'meta.json'), 'utf8'));
     assert.equal(meta.source, 'microphone+computer');
+    const fileSec = Number((/Duration: (\d+):(\d+):([\d.]+)/.exec(spawnSync(ffmpeg, ['-hide_banner', '-i', path.join(outRoot, id, 'audio.wav')]).stderr.toString()) || []).slice(1).reduce((a, x) => a * 60 + Number(x), 0));
+    console.log(`# recorded ${meta.durationSec.toFixed(1)} s, audio.wav ${fileSec.toFixed(1)} s, paused about 3 s of ${pausedWall.toFixed(1)} s`);
+    assert.ok(Math.abs(fileSec - meta.durationSec) < 1.5, 'the file is as long as the recorded time');
+    assert.ok(meta.durationSec < 4 + 1 + pausedWall - 2, 'the paused time is not in the recording');
     const wav = path.join(outRoot, id, 'audio.wav');
     const [callHz, micHz, none] = [strength(wav, 440), strength(wav, 1000), strength(wav, 2700)];
     console.log(`# call 440 Hz ${callHz.toFixed(4)}, mic 1000 Hz ${micHz.toFixed(4)}, empty band ${none.toFixed(4)}`);

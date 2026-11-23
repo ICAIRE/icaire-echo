@@ -10,3 +10,5 @@ models/
 .venv/
 .mrb-version.json
 .claude/
+installer/*.zip
+.DS_Store

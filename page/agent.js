@@ -277,7 +277,7 @@
     return rec;
   }
 
-  S.start = async ({ fps = 24, videoBps = 2500000 } = {}) => {
+  S.start = async ({ fps = 24, videoBps = 2500000, withMic = false } = {}) => {
     if (S.recording) return S.info;
     S.ctx = new AudioContext({ sampleRate: 48000 });
     await S.ctx.resume();
@@ -310,6 +310,14 @@
     const vTrack = display.getVideoTracks()[0];
     const tabAudio = display.getAudioTracks()[0];
     if (tabAudio) S.ctx.createMediaStreamSource(new MediaStream([tabAudio])).connect(S.bus.tab.input);
+    // someone talks through this window: their own voice is not in what the tab plays, so add the microphone
+    if (withMic) {
+      try {
+        const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+        S.mic = mic;
+        S.ctx.createMediaStreamSource(mic).connect(S.dest);
+      } catch {}
+    }
     S.source = 'meet';
     applySource(true);
     const aTrack = S.dest.stream.getAudioTracks()[0];
@@ -370,6 +378,7 @@
       startedAt: new Date().toISOString(),
       width: vTrack.getSettings().width,
       height: vTrack.getSettings().height,
+      mic: !!S.mic,
     };
     return S.info;
   };

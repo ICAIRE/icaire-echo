@@ -1,0 +1,72 @@
+#!/bin/bash
+# Meet Recorder for Mac. The first time, it installs the app into "Meet Recorder" in your home folder (showing its
+# progress as notifications), then it opens the app in your browser. Afterwards it just starts it, or shows it
+# when it is already running. It runs without a window: "Quit Meet Recorder" at the bottom of the page ends it.
+# What it does is written to ~/Library/Logs/Meet Recorder/meet-recorder.log.
+REPO="ICAIRE/meet-recorder-bot"
+DEST="${MRB_INSTALL_DIR:-$HOME/Meet Recorder}"
+PORT="${PORT:-4777}"
+LOGDIR="$HOME/Library/Logs/Meet Recorder"
+LOG="$LOGDIR/meet-recorder.log"
+mkdir -p "$LOGDIR"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ENV_HINTS=1
+
+notify() { osascript -e "display notification \"$1\" with title \"Meet Recorder\"" >/dev/null 2>&1; }
+fail() {
+  local b
+  b=$(osascript -e "button returned of (display dialog \"$1\" buttons {\"Show details\", \"OK\"} default button \"OK\" with title \"Meet Recorder\" with icon caution)" 2>/dev/null)
+  [ "$b" = "Show details" ] && open -a Console "$LOG"
+  exit 1
+}
+echo "--- $(date)" >> "$LOG"
+
+# already running: just show it
+if curl -fs -o /dev/null --max-time 2 "http://localhost:$PORT/api/state"; then
+  open "http://localhost:$PORT"
+  exit 0
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then
+    notify "Installing Node.js, one time. This can take a few minutes."
+    brew install node >> "$LOG" 2>&1 || fail "Node.js could not be installed. Check the internet connection and open Meet Recorder again."
+  else
+    osascript -e 'display dialog "Meet Recorder needs Node.js. Its download page will open: install it, then open Meet Recorder again." buttons {"OK"} default button 1 with title "Meet Recorder"' >/dev/null 2>&1
+    open "https://nodejs.org/en/download"
+    exit 0
+  fi
+fi
+
+if [ ! -f "$DEST/server.js" ]; then
+  notify "Downloading Meet Recorder…"
+  tmp="$(mktemp -d)"
+  curl -fsSL "https://codeload.github.com/$REPO/zip/refs/heads/main" -o "$tmp/app.zip" >> "$LOG" 2>&1 || fail "The download stopped. Check the internet connection and open Meet Recorder again."
+  unzip -q "$tmp/app.zip" -d "$tmp" && mkdir -p "$DEST" && cp -R "$tmp"/meet-recorder-bot-main/. "$DEST"/ || fail "Meet Recorder could not be unpacked into $DEST."
+  rm -rf "$tmp"
+  xattr -dr com.apple.quarantine "$DEST" 2>/dev/null
+fi
+cd "$DEST" || fail "Meet Recorder's folder is missing: $DEST"
+
+install_parts() {
+  cmp -s package-lock.json node_modules/.mrb-installed && return 0
+  notify "Installing the app's parts, one time (about a minute)…"
+  npm ci --no-fund --no-audit --loglevel=error >> "$LOG" 2>&1 && cp package-lock.json node_modules/.mrb-installed
+}
+install_parts || fail "The app's parts could not be installed. Check the internet connection and open Meet Recorder again."
+node -e "process.exit(require('./lib/whisper').findEngine() ? 0 : 1)" 2>/dev/null || notify "Getting the transcriber ready, one time…"
+node setup.js >> "$LOG" 2>&1
+
+# run in the background; after the app updates itself (code 75) start it again, installing any new parts
+export MRB_BACKGROUND=1
+nohup bash -c '
+  args=""
+  while true; do
+    node server.js $args
+    [ $? -eq 75 ] || break
+    if ! cmp -s package-lock.json node_modules/.mrb-installed; then npm ci --no-fund --no-audit --loglevel=error && cp package-lock.json node_modules/.mrb-installed; fi
+    node setup.js
+    args="--no-open"
+  done' >> "$LOG" 2>&1 &
+disown
+exit 0

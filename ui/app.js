@@ -93,8 +93,10 @@ async function api(path, body) {
   return data;
 }
 const css = (name) => getComputedStyle(document.body).getPropertyValue(name).trim();
+// recorded time of a Record recording: wall time since it started, less the time it spent paused
+const localElapsedMs = (me) => (me.pausedAt || performance.now()) - me.t0 - (me.pausedMs || 0);
 const nowSec = () => {
-  if (local) return (performance.now() - local.t0) / 1000;
+  if (local) return localElapsedMs(local) / 1000;
   return snap ? (snap.elapsedMs + (snap.status === 'recording' ? performance.now() - receivedAt : 0)) / 1000 : 0;
 };
 function fitCanvas(canvas, H) {
@@ -274,7 +276,7 @@ function render() {
   const meetingDone = !!(s && !s.active && s.id !== dismissedId);
   const showDone = !showLive && (!!localDone || meetingDone);
   let status = 'idle';
-  if (localLive) status = local.stopping ? 'processing' : 'recording';
+  if (localLive) status = local.stopping ? 'processing' : local.pausedAt ? 'paused' : 'recording';
   else if (meetingLive) status = s.status;
   else if (localDone) status = localDone.status;
   else if (meetingDone) status = s.status;
@@ -282,7 +284,7 @@ function render() {
 
   // top strip: always says whether anything is recording, and for how long
   let top = TOP[status] || status;
-  if (localLive && !local.stopping) top = local.call ? 'Recording you and the call' : 'Recording from the microphone';
+  if (localLive && !local.stopping) top = local.pausedAt ? 'Paused' : local.call ? 'Recording you and the call' : 'Recording from the microphone';
   else if (meetingLive && status === 'recording') top = 'In a meeting, recording';
   if ($('pill').textContent !== top) $('pill').textContent = top;
   if (!showLive && $('topClock').textContent !== '00:00:00') $('topClock').textContent = '00:00:00';
@@ -298,9 +300,11 @@ function render() {
   }
 
   if (localLive) {
-    $('statusTitle').textContent = local.stopping ? 'Saving the recording' : 'Recording from this computer';
+    $('statusTitle').textContent = local.stopping ? 'Saving the recording' : local.pausedAt ? 'Paused' : 'Recording from this computer';
     $('statusSub').textContent = local.stopping
       ? 'Then the transcript starts by itself'
+      : local.pausedAt
+        ? 'Nothing is being recorded. Press Resume to carry on in the same recording.'
       : local.call === 'ended'
         ? "Sound sharing was stopped, so only your microphone is recording now"
         : local.call
@@ -308,9 +312,13 @@ function render() {
           : "This computer's microphone";
     $('stopBtn').disabled = !!local.stopping;
     $('stopBtn').textContent = local.stopping ? 'Saving…' : 'Stop & transcribe';
+    $('pauseBtn').hidden = false;
+    $('pauseBtn').disabled = !!local.stopping;
+    $('pauseBtn').textContent = local.pausedAt ? 'Resume' : 'Pause';
     return;
   }
 
+  $('pauseBtn').hidden = true; // pausing is for Record; the bot's speaker log would drift out of line with the sound
   if (meetingLive) {
     const [title, sub] = STATUS[s.status] || [s.status, ''];
     $('statusTitle').textContent = title;
@@ -501,8 +509,12 @@ async function startLocal() {
   limit.ratio.value = 12;
   limit.attack.value = 0.003;
   limit.release.value = 0.25;
-  limit.connect(mix);
-  limit.connect(analyser);
+  // the browser's compressor adds make-up gain of its own, which brought peaks back to full scale: trim 3 dB after it
+  const trim = ctx.createGain();
+  trim.gain.value = 0.7;
+  limit.connect(trim);
+  trim.connect(mix);
+  trim.connect(analyser);
   for (const s of [stream, shared && new MediaStream(shared.getAudioTracks())].filter(Boolean)) ctx.createMediaStreamSource(s).connect(shared ? limit : mix);
   if (!shared) ctx.createMediaStreamSource(stream).connect(analyser);
   const buf = new Float32Array(analyser.fftSize);
@@ -519,9 +531,10 @@ async function startLocal() {
     analyser.getFloatTimeDomainData(buf);
     let sum = 0;
     for (const x of buf) sum += x * x;
+    if (local.pausedAt) return; // the sound strip stands still while paused
     local.levels.push(Math.min(1000, Math.round(Math.sqrt(sum / buf.length) * 1000)));
     if (local.levels.length > 600) local.levels.shift();
-    local.levelsEnd = (performance.now() - local.t0) / 1000;
+    local.levelsEnd = localElapsedMs(local) / 1000;
   }, 100);
   rec.ondataavailable = (e) => {
     if (!e.data || !e.data.size) return;
@@ -543,7 +556,7 @@ async function stopLocal() {
   if (!me || me.stopping) return;
   me.stopping = true;
   render();
-  const durationMs = Math.round(performance.now() - me.t0);
+  const durationMs = Math.round(localElapsedMs(me));
   await new Promise((r) => {
     me.rec.onstop = r;
     me.rec.stop();
@@ -629,6 +642,18 @@ function renderRecording(r) {
   });
   node.querySelector('.act-open').addEventListener('click', () => api('/api/open/' + r.id).catch((e) => alert(e.message)));
   nameFolderButtons(node);
+  node.querySelector('.act-delete').addEventListener('click', async () => {
+    const when = node.querySelector('.rec-when').textContent;
+    const sure = await confirmBox({ title: 'Delete this recording?', text: `The recording from ${when}, its audio, video and transcript are removed from this computer. This cannot be undone.`, ok: 'Delete' });
+    if (!sure) return;
+    try {
+      await api('/api/rec-delete/' + r.id);
+      node.remove();
+      if (!document.querySelector('.rec-item')) $('recEmpty').hidden = false;
+    } catch (e) {
+      alert(e.message);
+    }
+  });
   if (isLocal) node.querySelector('.act-merge').hidden = true; // merging needs a speaker timeline
 
   // Transcribe with the local Whisper model
@@ -780,6 +805,7 @@ async function loadTranscript(node, id, isLocal) {
   if (!text.trim()) {
     box.querySelector('.tx-meta').textContent = 'No speech was found in this recording.';
     box.querySelector('.tx-copy').hidden = true;
+    box.querySelector('.tx-copy-raw').hidden = true;
     box.querySelector('.tx-lines').replaceChildren();
     box.hidden = false;
     return;
@@ -812,26 +838,38 @@ async function loadTranscript(node, id, isLocal) {
     else box.dataset.collapsed = '';
     more.textContent = collapsed ? 'Show less' : 'Show the whole transcript';
   };
-  const copy = box.querySelector('.tx-copy');
-  copy.onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      const ta = el('textarea', { style: 'position:fixed;opacity:0' });
-      ta.value = text;
-      document.body.append(ta);
-      ta.select();
-      document.execCommand('copy');
-      ta.remove();
-    }
-    copy.textContent = 'Copied';
-    copy.dataset.copied = '';
-    clearTimeout(copy._t);
-    copy._t = setTimeout(() => {
-      copy.textContent = 'Copy transcript';
-      delete copy.dataset.copied;
-    }, 1800);
+  // the text alone: what was said, in order, without times or names
+  const raw = lines
+    .map((l) => {
+      const m = LINE.exec(l);
+      if (!m) return l;
+      const w = isLocal ? null : WHO.exec(m[3]);
+      return w ? w[3] : m[3];
+    })
+    .join('\n');
+  const copyButton = (b, value, label) => {
+    b.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(value);
+      } catch {
+        const ta = el('textarea', { style: 'position:fixed;opacity:0' });
+        ta.value = value;
+        document.body.append(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      b.textContent = 'Copied';
+      b.dataset.copied = '';
+      clearTimeout(b._t);
+      b._t = setTimeout(() => {
+        b.textContent = label;
+        delete b.dataset.copied;
+      }, 1800);
+    };
   };
+  copyButton(box.querySelector('.tx-copy'), text, 'Copy transcript');
+  copyButton(box.querySelector('.tx-copy-raw'), raw, 'Copy without names');
   box.hidden = false;
 }
 
@@ -891,7 +929,7 @@ $('joinForm').addEventListener('submit', async (e) => {
   }
   btn.disabled = true;
   try {
-    const s = await api('/api/join', { url: $('url').value, name: $('name').value, show: $('show').checked });
+    const s = await api('/api/join', { url: $('url').value, name: $('name').value, show: $('show').checked || $('talk').checked, talk: $('talk').checked });
     snap = s;
     receivedAt = performance.now();
     lastPreviewAt = 0;
@@ -906,6 +944,19 @@ $('joinForm').addEventListener('submit', async (e) => {
   }
 });
 $('localBtn').addEventListener('click', startLocal);
+$('pauseBtn').addEventListener('click', () => {
+  const me = local;
+  if (!me || me.stopping) return;
+  if (me.pausedAt) {
+    me.rec.resume();
+    me.pausedMs = (me.pausedMs || 0) + (performance.now() - me.pausedAt);
+    me.pausedAt = null;
+  } else {
+    me.rec.pause();
+    me.pausedAt = performance.now();
+  }
+  render();
+});
 $('stopBtn').addEventListener('click', async () => {
   if (local) return stopLocal();
   $('stopBtn').disabled = true;
@@ -928,8 +979,24 @@ window.addEventListener('beforeunload', (e) => {
   }
 });
 
+// When the app behind this page has stopped (quit, or the computer restarted), say so plainly instead of leaving
+// a half-empty page; reload by itself once it is back.
+let lostSince = 0;
+function showGone(gone) {
+  if (!gone) {
+    if (lostSince && Date.now() - lostSince > 1500) location.reload();
+    lostSince = 0;
+    $('gone').hidden = true;
+    return;
+  }
+  if (!lostSince) lostSince = Date.now();
+  $('gone').hidden = false;
+}
+
 function connect() {
   const es = new EventSource('/api/stream');
+  es.onerror = () => showGone(true);
+  es.onopen = () => showGone(false);
   es.onmessage = (m) => {
     const data = JSON.parse(m.data);
     snap = data.current;
@@ -939,6 +1006,7 @@ function connect() {
     if (window.onVoiceState) window.onVoiceState(data);
     if (data.whisperSetup) showWhisperSetup(data.whisperSetup);
     if (data.update) showUpdate(data.update);
+    $('quitBtn').hidden = !data.background;
   };
 }
 
@@ -978,6 +1046,40 @@ $('updateBtn').addEventListener('click', async () => {
     showUpdate(await api(apply ? '/api/update/apply' : '/api/update/check'));
   } catch (e) {
     $('updateText').textContent = e.message;
+  }
+});
+
+// A confirmation pop-up: resolves true when the person presses the action, false on Cancel or Escape
+function confirmBox({ title, text, ok = 'Delete' }) {
+  const d = $('confirm');
+  $('confirmTitle').textContent = title;
+  $('confirmText').textContent = text;
+  $('confirmOk').textContent = ok;
+  d.returnValue = '';
+  d.showModal();
+  d.querySelector('[value="cancel"]').focus();
+  return new Promise((resolve) => d.addEventListener('close', () => resolve(d.returnValue === 'ok'), { once: true }));
+}
+window.confirmBox = confirmBox;
+
+// talking in the bot's window needs the window
+$('talk').addEventListener('change', () => { if ($('talk').checked) $('show').checked = true; });
+$('loginBtn').addEventListener('click', async () => {
+  try {
+    await api('/api/login');
+    $('loginBtn').textContent = 'Sign in in the window that opened, then close it';
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
+// the Mac app has no window of its own: this ends it
+$('quitBtn').addEventListener('click', async () => {
+  try {
+    await api('/api/quit');
+    document.body.replaceChildren(el('main', {}, el('h1', { class: 'launch-h' }, 'Meet Recorder has stopped.'), el('p', { class: 'lede' }, 'Open the Meet Recorder app to start it again. You can close this tab.')));
+  } catch (e) {
+    alert(e.message);
   }
 });
 

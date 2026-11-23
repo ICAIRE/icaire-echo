@@ -190,10 +190,10 @@ const ADV = [
   ]],
   ['Reading and pauses', [
     ['split', 'Read the script', 'select', () => [['lines', 'line by line'], ['sentences', 'sentence by sentence']]],
-    ['pauses.sentence', 'Pause after each line', 'num', SECS],
+    ['pauses.sentence', 'Pause after each sentence (or line)', 'num', SECS],
     ['pauses.number', 'Extra pause after a line with a number', 'num', SECS],
     ['pauses.question', 'Extra pause after a question', 'num', SECS],
-    ['pauses.paragraph', 'Extra pause at an empty line', 'num', SECS],
+    ['pauses.paragraph', 'Extra pause between paragraphs (an empty line)', 'num', SECS],
     ['pauses.end', 'Silence at the very end', 'num', SECS],
     ['pauses.lineVary', 'Vary the pause a little (0.20 to 0.30 s), like a radio host', 'toggle'],
     ['pace.on', 'Say questions and exclamations a little faster', 'toggle'],
@@ -341,12 +341,14 @@ function renderAdvanced() {
       const keys = items === 'pron' ? ['spellings', 'names'] : items.map((x) => x[0]);
       const n = keys.filter((k) => k in VO.changes).length;
       const d = el('details', { class: 'adv-group', 'data-group': group });
-      if (open.has(group)) d.open = true;
+      // speed and pauses are what people tune most: open from the start
+      if (open.has(group) || (!body.dataset.ready && (group === 'Voice' || group === 'Reading and pauses'))) d.open = true;
       d.append(el('summary', {}, group, n ? el('span', { class: 'adv-count' }, `${n} changed`) : null));
       d.append(items === 'pron' ? pronEditor() : el('div', { class: 'adv-rows' }, ...clusters(items).map((c) => el('div', { class: 'adv-cluster' + (c.length > 1 ? ' many' : '') }, ...c.map(control)))));
       return d;
     })
   );
+  body.dataset.ready = '1';
   if (focus && $(focus)) $(focus).focus();
   const n = Object.keys(VO.changes).filter((k) => k !== 'voice').length;
   $('voAdvNote').textContent = n ? `${plural(n, 'change')} from ${presetOf(VO.preset).name}` : '';
@@ -355,7 +357,8 @@ function renderAdvanced() {
 
 function renderCount() {
   const t = $('voText').value.trim();
-  const words = t ? t.split(/\s+/).length : 0;
+  const said = t.replace(/\[\s*pause[^\]]*\]/gi, ' ').trim();
+  const words = said ? said.split(/\s+/).length : 0;
   const speed = Number(val('speed')) || 1;
   const sec = (words / (150 * (speed / 0.94))) * 60; // the presentation runs about 140-150 words a minute at 0.94
   $('voCount').textContent = words ? `${plural(words, 'word')} · about ${length(Math.max(1, sec))}` : '';
@@ -634,15 +637,14 @@ async function loadVoiceovers() {
           el('button', {
             class: 'key key-quiet key-sm vo-del',
             type: 'button',
-            onclick: async (e) => {
-              const b = e.currentTarget;
-              if (!b.dataset.sure) {
-                b.dataset.sure = '';
-                b.textContent = 'Delete for good?';
-                setTimeout(() => { delete b.dataset.sure; b.textContent = 'Delete'; }, 4000);
-                return;
+            onclick: async () => {
+              const sure = await confirmBox({ title: 'Delete this voice-over?', text: 'Its sound files and script are removed from this computer. This cannot be undone.', ok: 'Delete' });
+              if (!sure) return;
+              try {
+                await api('/api/vo-delete/' + v.id);
+              } catch (err) {
+                alert(err.message);
               }
-              await api('/api/vo-delete/' + v.id).catch(() => {});
               loadVoiceovers();
             },
           }, 'Delete')
@@ -716,3 +718,27 @@ window.onVoiceState = (data) => {
 
 if (!location.hash) history.replaceState(null, '', '#transcribe');
 showTab();
+
+// the right column's three panes: Voice, Settings, Your voice-overs
+function showPane(name) {
+  document.querySelectorAll('.vo-right .seg-btn').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.pane === name)));
+  document.querySelectorAll('.vo-right .pane').forEach((p) => (p.hidden = p.dataset.pane !== name));
+  try { localStorage.setItem('mrb.voPane', name); } catch {}
+}
+document.querySelectorAll('.vo-right .seg-btn').forEach((b) => b.addEventListener('click', () => showPane(b.dataset.pane)));
+try { const p = localStorage.getItem('mrb.voPane'); if (p) showPane(p); } catch {}
+
+// pause buttons: put "[pause 2s]" where the cursor is
+document.querySelectorAll('.vo-tools [data-pause]').forEach((b) =>
+  b.addEventListener('click', () => {
+    const ta = $('voText');
+    const secs = b.dataset.pause;
+    const at = ta.selectionStart ?? ta.value.length;
+    const end = ta.selectionEnd ?? at;
+    const before = ta.value.slice(0, at);
+    const mark = (before && !/\s$/.test(before) ? ' ' : '') + `[pause ${secs}s]` + ' ';
+    ta.setRangeText(mark, at, end, 'end');
+    ta.focus();
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  })
+);

@@ -56,6 +56,7 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
     whisperSetup: whisperSetup.status === 'idle' ? null : whisperSetup.snapshot(),
     voiceExtra: voiceExtra.status === 'idle' ? null : voiceExtra.snapshot(),
     update: updater.snapshot(),
+    background: process.env.MRB_BACKGROUND === '1',
   });
   let lastSent = 0;
   let pending = null;
@@ -221,6 +222,18 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
       .sort((a, b) => b.id.localeCompare(a.id));
   }
 
+  // The "Sign the bot in" window uses the bot's own Chrome profile; close it (gracefully, so the sign-in is saved)
+  // before the bot opens that profile.
+  async function closeSignInWindow() {
+    if (runOptions.setupPage) return; // the demo's fake Meet uses a profile of its own
+    const { PROFILE } = require('./lib/session');
+    const { spawnSync } = require('child_process');
+    if (process.platform === 'win32') return;
+    if (spawnSync('pgrep', ['-f', `user-data-dir=${PROFILE}`]).status !== 0) return;
+    spawnSync('pkill', ['-TERM', '-f', `user-data-dir=${PROFILE}`]);
+    for (let i = 0; i < 40 && spawnSync('pgrep', ['-f', `user-data-dir=${PROFILE}`]).status === 0; i++) await new Promise((r) => setTimeout(r, 250));
+  }
+
   const recDir = (id) => (/^[\w-]+$/.test(id || '') ? path.join(outRoot, id) : null);
 
   const server = http.createServer(async (req, res) => {
@@ -288,6 +301,7 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
       }
       if (req.method === 'POST' && p === '/api/join') {
         if (current && current.active) return json(res, 409, { error: 'The bot is already in a meeting. Stop it first.' });
+        await closeSignInWindow(); // Chrome lets only one window use the bot's profile at a time
         if (!HAS_CHROME && !runOptions.setupPage) return json(res, 400, { error: 'The meeting bot needs Google Chrome. Install it from google.com/chrome, then try again.' });
         const body = await readBody(req);
         let link = String(body.url || '').trim();
@@ -296,7 +310,7 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
         try { u = new URL(link); } catch { return json(res, 400, { error: 'That is not a valid link.' }); }
         if (u.hostname !== 'meet.google.com' || u.pathname.length < 4) return json(res, 400, { error: 'Paste a Google Meet link, like https://meet.google.com/abc-defg-hij' });
         const name = String(body.name || 'Recorder').trim().slice(0, 60) || 'Recorder';
-        current = new BotRun({ ...runOptions, outRoot, url: u.toString(), name, show: !!body.show });
+        current = new BotRun({ ...runOptions, outRoot, url: u.toString(), name, show: !!body.show || !!body.talk, talk: !!body.talk });
         current.on('update', broadcast);
         const run = current;
         run.run().then(() => {
@@ -417,6 +431,13 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
         if (!runOptions.noOpen) openFolder(dir);
         return json(res, 200, { ok: true, dir });
       }
+      if (req.method === 'POST' && (m = /^\/api\/rec-delete\/([\w-]+)$/.exec(p))) {
+        const dir = recDir(m[1]);
+        if (!dir || !fs.existsSync(dir)) return json(res, 404, { error: 'not found' });
+        if ((current && current.active && current.id === m[1]) || local.has(m[1]) || (job && job.active && job.id === m[1])) return json(res, 409, { error: 'It is still being recorded or transcribed.' });
+        fs.rmSync(dir, { recursive: true, force: true });
+        return json(res, 200, { ok: true });
+      }
       if (req.method === 'POST' && (m = /^\/api\/vo-delete\/([\w-]+)$/.exec(p))) {
         const dir = path.join(voiceRoot, m[1]);
         if (!fs.existsSync(dir)) return json(res, 404, { error: 'not found' });
@@ -488,6 +509,21 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
           try { transcribe = await startTranscription(m[1], {}); } catch (e) { transcribe = { error: e.message }; }
         }
         return json(res, 200, { id: m[1], durationSec, transcribe });
+      }
+      // sign the bot's browser into a Google account: opens Google's sign-in on the bot's own profile; the person signs in
+      if (req.method === 'POST' && p === '/api/login') {
+        if (current && current.active) return json(res, 409, { error: 'The bot is in a meeting. Stop it first, then sign it in.' });
+        const { PROFILE, CHROME } = require('./lib/session');
+        fs.mkdirSync(PROFILE, { recursive: true });
+        spawn(CHROME, [`--user-data-dir=${PROFILE}`, '--no-first-run', '--no-default-browser-check', 'https://accounts.google.com/'], { detached: true, stdio: 'ignore' }).unref();
+        return json(res, 200, { ok: true });
+      }
+      // the Mac app runs without a window: the panel's Quit button ends it (never mid-recording or mid-job)
+      if (req.method === 'POST' && p === '/api/quit') {
+        if (!idle()) return json(res, 409, { error: 'Something is still recording or being made. Stop it first.' });
+        json(res, 200, { ok: true });
+        setTimeout(() => process.exit(0), 300);
+        return;
       }
       // ---------- updates ----------
       if (req.method === 'POST' && p === '/api/update/check') return json(res, 200, await updater.check());

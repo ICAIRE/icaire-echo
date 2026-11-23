@@ -43,7 +43,8 @@ test('voice-over', async (t) => {
       assert.equal(info.languages.length, 9);
       const [presenter, layla, omar] = info.presets;
       assert.equal(presenter.recommended, true);
-      assert.deepEqual([presenter.settings.voice, presenter.settings.speed, presenter.settings.pauses.sentence, presenter.settings.export.loudnorm], ['af_heart', 0.94, 0.42, true]);
+      // the walkthrough's pacing: one sentence at a time, 0.5 s between sentences, 1.3 s more between paragraphs
+      assert.deepEqual([presenter.settings.voice, presenter.settings.speed, presenter.settings.split, presenter.settings.pauses.sentence, presenter.settings.pauses.paragraph, presenter.settings.export.loudnorm], ['af_heart', 0.94, 'sentences', 0.5, 1.3, true]);
       assert.deepEqual([layla.settings.voice, layla.settings.speed, layla.settings.closeGaps.on, layla.settings.room.wet], ['af_heart', 0.97, true, 0.11]);
       assert.deepEqual([omar.settings.voice, omar.settings.speed, omar.settings.level.target], ['am_fenrir', 0.97, 0.085]);
     });
@@ -60,7 +61,8 @@ test('voice-over', async (t) => {
         for (const f of ['voice.mp3', 'voice.wav', 'script.txt', 'settings.json', 'lines.json']) assert.ok(fs.existsSync(path.join(dir, f)), f);
         assert.ok(!fs.existsSync(path.join(dir, 'raw.wav')), 'raw file cleaned up');
         const lines = JSON.parse(fs.readFileSync(path.join(dir, 'lines.json'), 'utf8')).lines;
-        assert.equal(lines.length, 3, 'one piece per line of the script');
+        // the Presenter reads sentence by sentence (5 sentences); the radio hosts line by line (3 lines)
+        assert.equal(lines.length, preset === 'presenter' ? 5 : 3, 'one piece per sentence or per line');
         if (preset === 'presenter') normal = duration(path.join(dir, 'voice.wav'));
       }
       const r = await post('/api/voice/generate', { text, preset: 'presenter', changes: { speed: 1.3 } });
