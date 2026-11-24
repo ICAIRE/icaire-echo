@@ -709,7 +709,8 @@ body:not([data-mode='bot']) .meet-link { visibility: hidden; }
   #viewHome .mic-surround .still.b { inset: 10%; }
   #viewHome .mic-surround .still.a { inset: 23%; }
   #viewHome .hero-mic { width: 56%; height: 56%; }
-  #viewHome .hero-mic svg.i { width: 46%; height: 46%; }
+  /* a fixed size that follows the window (a percentage shrinks to nothing inside the button) */
+  #viewHome .hero-mic svg.i { width: clamp(44px, 7.4vh, 72px); height: clamp(44px, 7.4vh, 72px); }
   #viewHome .readiness { margin-top: clamp(6px, 1.4vh, 14px); min-height: 0; }
   /* a notice floats over the top of the page instead of pushing it down */
   #viewHome .notice { position: absolute; top: 0; left: 50%; translate: -50% 0; width: min(680px, 100%); z-index: 5; background: #3a3021; }
