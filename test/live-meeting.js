@@ -9,7 +9,11 @@
 //   5. Stops the recorder, transcribes with Whisper through the panel, and scores:
 //      audio level, the who-spoke-when timeline, and the transcript (words + speaker labels).
 //
-//   node test/live-meeting.js [--panel http://localhost:4777] [--speakers 4] [--keep]
+//   6. With --lobby: one speaker joins as a guest (not signed in) and a second recorder joins as a guest too;
+//      both have to ask to join, and the host lets them in only after --admit-after seconds (default 40), so
+//      the waiting room is part of the test.
+//
+//   node test/live-meeting.js [--panel http://localhost:4777] [--speakers 4] [--lobby] [--admit-after 40] [--keep]
 const fs = require('fs');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
@@ -24,12 +28,16 @@ const PANEL = opt('--panel', 'http://localhost:4777');
 const OUT = path.join(__dirname, 'out', 'live-meeting');
 const N = Number(opt('--speakers', 4));
 
+const MAC = process.platform === 'darwin';
+// Windows voices (tts.ps1), or the Mac's own: Daniel (British), Samantha (American), Karen (Australian), Majed (Arabic)
 const SPEAKERS = [
-  { key: 'George', voice: 'George' },
-  { key: 'Susan', voice: 'Susan' },
-  { key: 'Zira', voice: 'Zira' },
-  { key: 'Naayf', voice: 'Naayf' },
+  { key: 'George', voice: MAC ? 'Daniel' : 'George' },
+  { key: 'Susan', voice: MAC ? 'Samantha' : 'Susan' },
+  { key: 'Zira', voice: MAC ? 'Karen' : 'Zira' },
+  { key: 'Naayf', voice: MAC ? 'Majed' : 'Naayf' },
 ].slice(0, N);
+const LOBBY = args.includes('--lobby');
+const ADMIT_AFTER = Number(opt('--admit-after', 40)) * 1000;
 
 // gap = seconds after the previous line ENDS (negative: starts before it ends, i.e. interrupts / overlaps).
 const SCRIPT = [
@@ -72,7 +80,8 @@ function makeClips() {
   const jobs = SCRIPT.map((l, i) => ({ voice: SPEAKERS.find((s) => s.key === l.who).voice, text: l.text, file: path.join(dir, `raw${i}.wav`) }));
   const jobFile = path.join(dir, 'jobs.json');
   fs.writeFileSync(jobFile, JSON.stringify(jobs), 'utf8');
-  execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'tts.ps1'), '-jobs', jobFile], { stdio: 'inherit' });
+  if (MAC) for (const j of jobs) execFileSync('say', ['-v', j.voice, '-o', j.file.replace(/\.wav$/, '.aiff'), j.text]), (j.file = j.file.replace(/\.wav$/, '.aiff'));
+  else execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'tts.ps1'), '-jobs', jobFile], { stdio: 'inherit' });
   const edge = 'silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.02';
   return SCRIPT.map((l, i) => {
     const file = path.join(dir, `line${i}.wav`);
@@ -148,7 +157,8 @@ async function openSpeaker(i, profile) {
     headless: true,
     viewport: { width: 1280, height: 800 },
     locale: 'en-US',
-    ignoreDefaultArgs: ['--enable-automation'],
+    // the copied sign-in is locked with the computer's keychain, like the bot's own (lib/session.js)
+    ignoreDefaultArgs: ['--enable-automation', '--use-mock-keychain', '--password-store=basic'],
     args: [
       '--use-fake-ui-for-media-stream',
       '--use-fake-device-for-media-stream',
@@ -169,12 +179,14 @@ async function openSpeaker(i, profile) {
 
 async function joinCall(sp, url) {
   const { page } = sp;
+  const nameBox = page.locator('input[aria-label="Your name" i], input[placeholder="Your name" i]');
   const say = (m) => log(`speaker ${sp.i + 1}: ${m}`);
   page.goto(url, { waitUntil: 'commit', timeout: 60000 }).catch(() => {});
   let clicked = false;
   for (let n = 0; n < 120; n++) {
     await sleep(1000);
     if (page.url().includes('accounts.google.com')) throw new Error(`speaker ${sp.i + 1}: the copied profile is not signed in`);
+    if (sp.guest && (await nameBox.first().isVisible().catch(() => false)) && !(await nameBox.first().inputValue().catch(() => ''))) await nameBox.first().fill(sp.name).catch(() => {});
     const body = await page.locator('body').innerText().catch(() => '');
     if (/you can.t join this (video )?call/i.test(body)) throw new Error(`speaker ${sp.i + 1}: Meet refused (${url})`);
     if (await page.locator('[aria-label*="Leave call" i]').count()) {
@@ -191,7 +203,8 @@ async function joinCall(sp, url) {
       say('clicked join');
     }
     if (n === 40) await page.screenshot({ path: path.join(OUT, `speaker${sp.i + 1}-stuck.png`) }).catch(() => {});
-    if (n === 119) throw new Error(`speaker ${sp.i + 1}: never got into the call`);
+    if (n === 119 && !sp.guest) throw new Error(`speaker ${sp.i + 1}: never got into the call`);
+    if (sp.guest && n === 119) n = 60; // a guest waits for the host, however long that takes (the run's own limits still apply)
   }
   await page.mouse.move(1, 1).catch(() => {});
   // Make sure the microphone is on.
@@ -203,6 +216,51 @@ async function joinCall(sp, url) {
   }
   const micOff = await page.locator('[aria-label*="Turn on microphone" i]').first().isVisible().catch(() => false);
   if (micOff) say('WARNING: microphone still off');
+}
+
+// ---------- the host: lets in whoever asks, after they have waited ADMIT_AFTER ----------
+function admitLoop(host) {
+  const seen = new Map();
+  let stop = false;
+  (async () => {
+    while (!stop) {
+      await sleep(1500);
+      const page = host.page;
+      const body = await page.locator('body').innerText().catch(() => '');
+      const asking = [...body.matchAll(/([^\n]{1,60}) (?:wants|asks) to join/gi)].map((m) => m[1].trim());
+      const pending = (await page.getByRole('button', { name: /^(admit|admit all|view all)$/i }).count().catch(() => 0)) > 0 || asking.length;
+      if (!pending) continue;
+      const key = asking.join(',') || 'someone';
+      if (!seen.has(key)) (seen.set(key, Date.now()), log(`host: ${key} asked to join; letting them wait ${ADMIT_AFTER / 1000} s`));
+      if (Date.now() - seen.get(key) < ADMIT_AFTER) continue;
+      for (const name of [/^admit all$/i, /^admit$/i]) {
+        const b = page.getByRole('button', { name });
+        if (await b.first().isVisible().catch(() => false)) {
+          await b.first().click().catch(() => {});
+          await sleep(800);
+          // "Admit all" asks to confirm
+          await page.getByRole('button', { name: /^admit all$/i }).last().click({ timeout: 1500 }).catch(() => {});
+          log(`host: let in ${key}`);
+          seen.delete(key);
+          break;
+        }
+      }
+      // the request can sit behind "View" in a toast
+      await page.getByRole('button', { name: /^view$/i }).first().click({ timeout: 500 }).catch(() => {});
+    }
+  })();
+  return () => (stop = true);
+}
+
+// a second recorder, signed in to nothing: it has to ask to join and wait, like a bot in someone else's meeting
+async function lobbyRecorder() {
+  const os = require('os');
+  const { createServer } = require('../server');
+  const outRoot = path.join(OUT, 'lobby-recordings');
+  fs.mkdirSync(outRoot, { recursive: true });
+  const server = createServer({ outRoot, autoTranscribe: false, runOptions: { profile: fs.mkdtempSync(path.join(os.tmpdir(), 'echo-lobby-')), noOpen: true } });
+  await new Promise((r) => server.listen(4781, '127.0.0.1', r));
+  return server;
 }
 
 // ---------- 5. scoring ----------
@@ -349,7 +407,14 @@ else if (require.main === module) (async () => {
 
   log('Starting speakers...');
   const speakers = [];
-  for (let i = 0; i < SPEAKERS.length; i++) speakers.push(await openSpeaker(i, copyProfile(i)));
+  for (let i = 0; i < SPEAKERS.length; i++) {
+    // with --lobby, the last speaker is a guest who has to be let in
+    const guest = LOBBY && i === SPEAKERS.length - 1 && i > 0;
+    const profile = guest ? fs.mkdtempSync(path.join(require('os').tmpdir(), 'echo-guest-')) : copyProfile(i);
+    speakers.push(Object.assign(await openSpeaker(i, profile), { guest, name: SPEAKERS[i].key }));
+  }
+  let stopAdmitting = () => {};
+  let lobby = null;
   let cleanup = async () => {
     for (const sp of speakers) {
       await sp.page.locator('[aria-label*="Leave call" i]').first().click({ timeout: 2000 }).catch(() => {});
@@ -373,7 +438,8 @@ else if (require.main === module) (async () => {
     log('New meeting: ' + url);
     fs.writeFileSync(path.join(OUT, 'meeting.txt'), url);
     await joinCall(host, url);
-    for (const sp of speakers.slice(1)) await joinCall(sp, url);
+    stopAdmitting = admitLoop(host);
+    await Promise.all(speakers.slice(1).map((sp) => joinCall(sp, url)));
 
     // load clips into each speaker
     for (const c of clips) {
@@ -391,6 +457,28 @@ else if (require.main === module) (async () => {
       if (n === 180) throw new Error('Recorder never started recording (' + c.status + ')');
     }
     log('Recorder is recording (' + run.id + ')');
+    if (LOBBY) {
+      log('Sending a second recorder as a guest (it has to wait to be let in)...');
+      lobby = await lobbyRecorder();
+      const lapi = (m, p, b) => fetch('http://localhost:4781' + p, { method: m, headers: { host: 'localhost:4781', 'x-mrb': '1', 'content-type': 'application/json' }, body: b && JSON.stringify(b) }).then((r) => r.json());
+      await lapi('POST', '/api/join', { url, name: 'Guest Recorder' });
+      const asked = Date.now();
+      let waited = false;
+      for (let n = 0; n < 600; n++) {
+        await sleep(1000);
+        const c = (await lapi('GET', '/api/state')).current;
+        if (c.status === 'waiting' && !waited) (waited = true), log('guest recorder: waiting to be let in');
+        if (c.status === 'recording') {
+          log(`guest recorder: let in after ${((Date.now() - asked) / 1000).toFixed(0)} s, recording`);
+          break;
+        }
+        if (!c.active) {
+          log('guest recorder ended: ' + (c.error || c.status));
+          break;
+        }
+      }
+      lobby.lapi = lapi;
+    }
 
     const pidOf = {};
     for (let i = 0; i < speakers.length; i++) pidOf[SPEAKERS[i].key] = await speakers[i].page.evaluate(SELF_PID);
@@ -415,6 +503,7 @@ else if (require.main === module) (async () => {
 
     log('Stopping the recorder...');
     await api('POST', '/api/stop');
+    if (lobby) await lobby.lapi('POST', '/api/stop').catch(() => {});
     let rec;
     for (let n = 0; n < 300; n++) {
       await sleep(1000);
@@ -422,6 +511,7 @@ else if (require.main === module) (async () => {
       if (!rec.active) break;
     }
     log('Recorder: ' + rec.status + (rec.error ? ' ' + rec.error : ''));
+    stopAdmitting();
     for (const l of rec.logs.slice(-12)) log('  | ' + l.msg);
     await cleanup();
     cleanup = async () => {};
@@ -437,10 +527,31 @@ else if (require.main === module) (async () => {
       }
     }
 
-    const report = score(rec.outDir, truth, pidOf);
+    let report = score(rec.outDir, truth, pidOf);
+    if (lobby) {
+      let lrec;
+      for (let n = 0; n < 300; n++) {
+        await sleep(1000);
+        lrec = (await lobby.lapi('GET', '/api/state')).current;
+        if (!lrec.active) break;
+      }
+      report += `\n\n## Guest recorder (had to wait to be let in)\n\nStatus: ${lrec.status}${lrec.error ? ' ' + lrec.error : ''}\n\n` + lrec.logs.map((l) => '- ' + l.msg).join('\n');
+      if (lrec.status === 'done') {
+        log('Transcribing the guest recorder...');
+        await lobby.lapi('POST', '/api/transcribe/' + lrec.id, {});
+        for (let n = 0; n < 1200; n++) {
+          await sleep(1000);
+          const t = (await lobby.lapi('GET', '/api/state')).transcribe;
+          if (t && ['done', 'error', 'cancelled'].includes(t.status)) break;
+        }
+        try { report += '\n\n' + score(lrec.outDir, truth, pidOf); } catch (e) { report += '\n\nGuest recorder score failed: ' + e.message; }
+      }
+      await new Promise((r) => lobby.close(r));
+    }
     fs.writeFileSync(path.join(OUT, 'report.md'), report + '\n\nRecording: ' + rec.outDir + '\n');
     log('Report: ' + path.join(OUT, 'report.md'));
   } finally {
+    stopAdmitting();
     await cleanup();
     if (!args.includes('--keep')) fs.rmSync(path.join(OUT, 'profiles'), { recursive: true, force: true });
   }

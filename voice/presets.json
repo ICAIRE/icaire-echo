@@ -117,15 +117,15 @@
   "presets": [
     {
       "id": "presenter",
-      "name": "Presenter",
-      "about": "Calm, warm narrator, paced like the Ideas City walkthrough: one sentence at a time, with room to breathe.",
+      "name": "Calm narrator",
+      "about": "Calm and warm, one sentence at a time with room to breathe, like the Ideas City walkthrough.",
       "recommended": true,
       "settings": { "split": "sentences", "pauses": { "sentence": 0.5, "number": 0.6, "question": 0.3, "paragraph": 1.3, "end": 0.6 } }
     },
     {
       "id": "layla",
-      "name": "Layla",
-      "about": "Quick, warm radio host from Manara FM.",
+      "name": "Quick radio host",
+      "about": "Quick and lively, line by line, like a radio host.",
       "settings": {
         "voice": "af_heart",
         "speed": 0.97,
@@ -143,8 +143,8 @@
     },
     {
       "id": "omar",
-      "name": "Omar",
-      "about": "Easy-going radio host from Manara FM.",
+      "name": "Easy-going radio host",
+      "about": "Relaxed, line by line, like an easy-going radio host.",
       "settings": {
         "voice": "am_fenrir",
         "speed": 0.97,

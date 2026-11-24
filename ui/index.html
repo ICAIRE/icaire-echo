@@ -1,367 +1,410 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Meet Recorder</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f2a38'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%238dc63f'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/ui/tokens.css">
+  <meta name="color-scheme" content="dark">
+  <title>ICAIRE Echo</title>
+  <link rel="icon" href="/ui/echo-mark.svg">
   <link rel="stylesheet" href="/ui/style.css">
-  <script src="/ui/theme.js"></script>
 </head>
 <body data-status="idle">
+<a class="skip" href="#main">Skip to content</a>
+<div id="app" data-view="record">
 
-  <header class="top">
-    <div class="brand">
-      <img class="lockup-light" src="/ui/icaire-lockup.png" alt="International Center for AI Research and Ethics, under the auspices of UNESCO" width="480" height="215">
-      <img class="lockup-dark" src="/ui/icaire-lockup-white.png" alt="" width="480" height="215">
-      <span class="brand-name">Meet Recorder</span>
-    </div>
-    <nav class="tabs" role="tablist" aria-label="Tools">
-      <a class="tab-btn" id="tabBtnTranscribe" role="tab" href="#transcribe" aria-controls="tabTranscribe">Transcribe</a>
-      <a class="tab-btn" id="tabBtnVoice" role="tab" href="#voice" aria-controls="tabVoice">Voice-over</a>
+  <!-- ===== top bar ===== -->
+  <header class="topbar">
+    <a class="brand" href="#record" aria-label="ICAIRE Echo, home">
+      <img src="/ui/echo-mark.svg" alt="" width="36" height="36">
+      <span>ICAIRE <b>Echo</b></span>
+    </a>
+    <nav class="views" aria-label="Sections">
+      <a class="view-link" href="#record" data-view="record"><i data-icon="mic"></i><span>Record</span></a>
+      <a class="view-link" href="#voice" data-view="voice"><i data-icon="voices"></i><span>Voice-overs</span></a>
     </nav>
-    <div class="update" id="update" aria-live="polite">
-      <span class="update-text" id="updateText"></span>
-      <button class="key key-quiet key-sm" id="updateBtn" type="button">Check for updates</button>
-    </div>
-    <button class="key key-quiet key-sm quit" id="quitBtn" type="button" hidden>Quit</button>
-    <div class="onair" id="onair" role="status" aria-live="polite">
-      <span class="lamp" aria-hidden="true"></span>
-      <span class="onair-text" id="pill">Not recording</span>
-      <span class="onair-short" aria-hidden="true">REC</span>
-      <span class="onair-time" id="topClock">00:00:00</span>
-    </div>
+    <a class="live-pill" id="livePill" href="#record" hidden>
+      <span class="live-dot" aria-hidden="true"></span>
+      <strong id="pillTitle">Recording</strong>
+      <span class="live-time" id="pillTime">0:00</span>
+      <small id="pillState">Recording</small>
+      <i data-icon="return"></i>
+    </a>
+    <details class="app-menu" id="appMenu">
+      <summary><i data-icon="settings"></i><span>More</span></summary>
+      <nav aria-label="More">
+        <a class="menu-item" href="#settings"><i data-icon="storage"></i>Models and storage</a>
+        <button class="menu-item" type="button" id="openRecordings"><i data-icon="files"></i><span class="show-in">Open recordings folder</span></button>
+        <button class="menu-item" type="button" id="loginBtn"><i data-icon="login"></i>Sign the bot in to Google</button>
+        <button class="menu-item" type="button" id="updateBtn"><i data-icon="refresh"></i><span id="updateBtnText">Check for updates</span></button>
+        <p class="menu-note" id="updateText" aria-live="polite"></p>
+        <button class="menu-item" type="button" id="quitBtn" hidden><i data-icon="power"></i>Quit ICAIRE Echo</button>
+      </nav>
+    </details>
   </header>
 
   <div class="gone" id="gone" role="alert" hidden>
-    <strong>Meet Recorder is not running.</strong>
-    <span>Open the Meet Recorder app (or Start Meet Recorder) to start it. This page comes back by itself.</span>
+    <strong>ICAIRE Echo is not running.</strong>
+    <span>Open the ICAIRE Echo app to start it. This page comes back by itself.</span>
   </div>
 
-  <main>
-    <div id="tabTranscribe" class="tab" role="tabpanel" aria-labelledby="tabBtnTranscribe">
-    <div class="tx-left">
-    <!-- Finished -->
-    <section id="done" class="done" hidden>
-      <div class="done-head">
-        <div>
-          <h1 id="doneTitle">Saved</h1>
-          <p id="doneSub" class="lede"></p>
+  <!-- ===== left: details ===== -->
+  <aside class="inspector" id="inspector" aria-label="Details">
+
+    <!-- Record: the recording's details -->
+    <section class="panel" data-for="record">
+      <details class="card-details" id="recCard" open>
+        <summary><i data-icon="settings"></i><span id="recCardTitle">Recording details</span></summary>
+        <div class="panel-tabs" id="recTabs" role="tablist" hidden>
+          <button type="button" role="tab" data-tab="details" aria-selected="true">Details</button>
+          <button type="button" role="tab" data-tab="people" aria-selected="false">People</button>
         </div>
-        <button id="againBtn" class="key key-primary" type="button">Record another</button>
-      </div>
-      <div id="doneNotes" class="notes"></div>
-    </section>
-    <!-- Start: two ways to record -->
-    <section id="launch" class="launch" aria-labelledby="launchHead">
-      <div class="page-head">
-        <h1 id="launchHead">Record a meeting. Get the transcript with names.</h1>
-        <p class="lede">Everything stays on this computer. Nothing is uploaded anywhere.</p>
-      </div>
 
-      <div class="modules">
-        <form id="joinForm" class="module module-meet" autocomplete="off">
-          <h2>Or send the bot to a Google Meet</h2>
-          <label class="field field-url">
-            <span>Meet link</span>
-            <input id="url" type="text" inputmode="url" placeholder="meet.google.com/abc-defg-hij" required spellcheck="false">
-          </label>
-          <div class="join-row">
-            <label class="field field-name">
-              <span>Its name in the call</span>
-              <input id="name" type="text" value="Recorder" maxlength="60">
-            </label>
-            <button class="key key-primary btn-join" type="submit">Join meeting</button>
-          </div>
-          <label class="check">
-            <input id="show" type="checkbox">
-            <span>Show the bot's browser window while it records</span>
-          </label>
-          <label class="check">
-            <input id="talk" type="checkbox">
-            <span>I'll talk in that window myself (uses my microphone and camera)</span>
-          </label>
-          <button class="key key-quiet key-sm" id="loginBtn" type="button">Sign the bot in to Google</button>
-          <p class="form-error" id="joinError" role="alert"></p>
-          <ol class="steps" aria-label="How it works">
-            <li><span><b>Paste</b> the Meet link</span></li>
-            <li><span><b>Let it in</b> from Meet when it asks</span></li>
-            <li><span><b>It records</b> and notes who talks when</span></li>
-            <li><span><b>Stop</b>, then transcribe</span></li>
-          </ol>
-        </form>
-
-        <section class="module module-local" aria-labelledby="localHead">
-          <h2 id="localHead">Record here</h2>
-          <p class="module-text">No bot needed. Records your microphone, and the other people in your call too, then writes the transcript when you stop.</p>
-          <button id="localBtn" class="rec-key" type="button" aria-describedby="localHint">
-            <span class="rec-key-dot" aria-hidden="true"></span>
-            <span class="rec-key-label">Record</span>
-          </button>
-          <label class="check">
-            <input id="localCall" type="checkbox" checked>
-            <span>Also record the people in my call</span>
-          </label>
-          <label class="people-count">
-            <span>How many people will talk?</span>
-            <select id="localPeople">
+        <!-- before and during a recording -->
+        <div class="panel-body" id="setupBody">
+          <p class="save-note" id="setupNote">Set these before you start, or leave them as they are.</p>
+          <label class="field"><span>Title</span><input id="newTitle" type="text" maxlength="120" placeholder="Name this recording" autocomplete="off"></label>
+          <label class="field"><span>How many people will talk?</span>
+            <select id="people">
               <option value="">Not sure</option>
               <option value="1">Just me</option>
               <option value="2">2</option><option value="3">3</option><option value="4">4</option>
               <option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option>
             </select>
           </label>
-          <p id="localHint" class="hint"></p>
-          <p class="form-error" id="localError" role="alert"></p>
-        </section>
-      </div>
-    </section>
-    </div>
-
-    <!-- Live: the console while recording -->
-    <section id="live" class="live" hidden aria-label="Recording now">
-      <div class="deck">
-        <div class="deck-state">
-          <span class="onair-lens" aria-hidden="true"><span class="lamp"></span><span class="lens-label">REC</span></span>
-          <div>
-            <div id="statusTitle" class="status-title">Starting…</div>
-            <div id="statusSub" class="status-sub"></div>
+          <div class="panel-section" data-mode="local">
+            <label class="switch-line"><i data-icon="audio"></i><span>Call sound</span><input id="localCall" type="checkbox" checked></label>
+            <p class="switch-help" id="localHint">Also records the other people in your call.</p>
+          </div>
+          <div class="panel-section" data-mode="bot">
+            <label class="field"><span>The bot's name in the call</span><input id="name" type="text" value="Recorder" maxlength="60" autocomplete="off"></label>
+            <label class="switch-line"><i data-icon="screen"></i><span>Show the bot's window</span><input id="show" type="checkbox"></label>
+            <p class="switch-help">Watch what the bot sees while it records.</p>
+            <label class="switch-line"><i data-icon="mic"></i><span>Talk through the bot</span><input id="talk" type="checkbox"></label>
+            <p class="switch-help">Uses your microphone and camera in the bot's window.</p>
           </div>
         </div>
-        <div class="lcd" aria-label="Recording time">
-          <span class="lcd-label">REC</span>
-          <span id="clock" class="clock">00:00:00</span>
+
+        <!-- an open recording -->
+        <div class="panel-body" id="infoBody" data-tab="details" hidden>
+          <p class="save-note">Changes save as you type</p>
+          <label class="field"><span>Title</span><input id="recTitleInput" type="text" maxlength="120" autocomplete="off"></label>
+          <dl class="facts" id="recFacts"></dl>
+          <div class="panel-section">
+            <label class="field"><span>Transcriber</span><select id="whisperModel"></select></label>
+            <button type="button" class="wide" id="retranscribe"><i data-icon="refresh"></i>Transcribe again</button>
+            <label class="text-button file-pick" id="mergePick" hidden>Use a transcript made elsewhere<input type="file" accept=".json,.srt,.vtt" hidden></label>
+          </div>
         </div>
-        <button id="pauseBtn" class="key key-quiet key-pause" type="button" hidden>Pause</button>
-        <button id="stopBtn" class="key key-primary key-stop" type="button">Stop &amp; save</button>
+        <div class="panel-body" id="peopleBody" data-tab="people" hidden>
+          <p class="save-note" id="peopleNote">Give each voice a name. The transcript follows.</p>
+          <div id="peopleList" class="people-edit"></div>
+        </div>
+      </details>
+    </section>
+
+    <!-- Voice-overs: the voice and its settings -->
+    <section class="panel" data-for="voice" hidden>
+      <details class="card-details" id="voPanel" open>
+        <summary><i data-icon="voices"></i><span>Voice</span></summary>
+        <div class="panel-tabs" role="tablist">
+          <button type="button" role="tab" class="seg-btn" data-pane="voice" aria-selected="true">Voice</button>
+          <button type="button" role="tab" class="seg-btn" data-pane="settings" aria-selected="false">Settings</button>
+        </div>
+        <div class="panel-body pane vo-voice" data-pane="voice">
+          <p class="save-note">Chosen: <b id="voChosen"></b></p>
+          <label class="field"><span>Pacing</span><select id="voPacing"></select></label>
+          <p class="switch-help" id="voPacingAbout"></p>
+          <div class="voice-tools">
+            <select id="voLangPick" aria-label="Language"></select>
+            <label class="search-field"><i data-icon="search"></i><input id="voSearch" type="search" placeholder="Search" autocomplete="off" aria-label="Search voices"></label>
+          </div>
+          <div id="voExtra" class="vo-extra" hidden aria-live="polite"></div>
+          <ul id="voVoices" class="voice-list" role="radiogroup" aria-label="Voices"></ul>
+          <p class="switch-help" id="voNone" hidden>No voice matches that.</p>
+          <p class="switch-help">There is no Arabic voice yet: Kokoro does not speak Arabic.</p>
+        </div>
+        <div class="panel-body pane" data-pane="settings" hidden>
+          <div id="voAdv" class="vo-adv">
+            <div class="vo-adv-top">
+              <p class="save-note"><span>Starts at the chosen voice's own settings.</span> <span id="voAdvNote"></span></p>
+              <button id="voResetAll" class="small" type="button">Reset all</button>
+            </div>
+            <div id="voAdvBody" class="vo-adv-body"></div>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <!-- Settings -->
+    <section class="panel" data-for="settings" hidden>
+      <div class="card-details static">
+        <div class="summary-like"><i data-icon="shield"></i><span>On this computer</span></div>
+        <div class="panel-body">
+          <p class="switch-help">Recordings, transcripts, voice-overs and every model stay on this computer. Nothing is uploaded.</p>
+          <p class="switch-help">Updates come from ICAIRE's public repository on GitHub, and only the app's own files change.</p>
+          <p class="switch-help" id="versionNote"></p>
+        </div>
+      </div>
+    </section>
+  </aside>
+
+  <!-- ===== centre ===== -->
+  <main id="main" tabindex="-1">
+
+    <!-- home: start a recording -->
+    <section class="view" id="viewHome" data-for="record">
+      <div class="notice" id="notice" role="status" hidden>
+        <div><strong id="noticeTitle"></strong><p id="noticeText"></p></div>
+        <button type="button" class="icon-button" id="noticeClose" aria-label="Close"><i data-icon="close"></i></button>
+      </div>
+      <div class="home-focus">
+        <h1>Start a recording</h1>
+        <p class="hero-subtitle">One tap to record. The transcript, with names, comes when you stop.</p>
+        <div class="mode" role="radiogroup" aria-label="How to record">
+          <button type="button" role="radio" data-mode="local" aria-checked="true"><i data-icon="laptop"></i>On this computer</button>
+          <button type="button" role="radio" data-mode="bot" aria-checked="false"><i data-icon="bot"></i>Bot joins a Meet</button>
+        </div>
+        <form class="meet-link" id="joinForm" autocomplete="off">
+          <label class="sr-only" for="url">Google Meet link</label>
+          <i data-icon="link"></i>
+          <input id="url" type="text" inputmode="url" placeholder="Paste the Meet link: meet.google.com/abc-defg-hij" spellcheck="false">
+        </form>
+        <div class="mic-surround">
+          <span class="ring" aria-hidden="true"></span><span class="ring" aria-hidden="true"></span><span class="ring" aria-hidden="true"></span>
+          <span class="still b" aria-hidden="true"></span><span class="still a" aria-hidden="true"></span>
+          <button class="hero-mic" id="bigBtn" type="button" aria-describedby="bigCaption"><i data-icon="mic"></i><i data-icon="bot"></i></button>
+        </div>
+        <p class="mic-caption" id="bigCaption">Tap to start recording</p>
+        <p class="shortcut-hint" id="bigHint"></p>
+        <p class="form-error" id="startError" role="alert"></p>
+        <div class="readiness" id="readiness"></div>
+        <button class="text-button" type="button" id="setupLink">Recording setup</button>
+      </div>
+    </section>
+
+    <!-- live: recording now -->
+    <section class="view" id="viewLive" data-for="record" hidden aria-label="Recording now">
+      <h1 class="recording-heading" id="liveHeading">Recording</h1>
+      <div class="recording-focus">
+        <p class="recording-label"><span class="rec-dot" aria-hidden="true"></span><span id="liveLabel">Recording</span></p>
+        <div class="capture-surround">
+          <span class="ring" aria-hidden="true"></span><span class="ring" aria-hidden="true"></span><span class="ring" aria-hidden="true"></span>
+          <button class="capture-button" id="captureBtn" type="button">
+            <span class="capture-wave" id="captureWave" aria-hidden="true"></span>
+            <span class="capture-time" id="clock">0:00</span>
+            <span class="capture-label" id="captureLabel">Tap to pause</span>
+          </button>
+        </div>
+        <p class="live-sub" id="liveSub"></p>
+        <div class="recording-controls">
+          <button class="danger" id="stopBtn" type="button"><i data-icon="stop"></i><span id="stopText">End</span></button>
+        </div>
+        <div class="meter">
+          <span class="meter-label">Sound</span>
+          <div class="meter-track"><span id="meterBar"></span></div>
+          <span class="meter-note" id="waveNote">Waiting for sound…</span>
+        </div>
+        <p class="capture-status" id="captureStatus"></p>
       </div>
 
-      <section class="wave" aria-labelledby="waveHead">
-        <div class="wave-head">
-          <h2 id="waveHead">Sound</h2>
-          <span id="waveNote" class="wave-note">Waiting for sound…</span>
+      <div class="live-card" id="botCard" hidden>
+        <div class="live-tabs" role="tablist">
+          <button type="button" role="tab" data-live="people" aria-selected="true"><i data-icon="people"></i>Who's talking</button>
+          <button type="button" role="tab" data-live="view" aria-selected="false"><i data-icon="screen"></i>What the bot sees</button>
+          <button type="button" role="tab" data-live="log" aria-selected="false"><i data-icon="notes"></i>Activity</button>
+          <span class="live-meta" id="peopleMeta"></span>
         </div>
-        <div class="wave-screen"><canvas id="wave" aria-label="Live sound level of the recording"></canvas></div>
+        <div class="live-pane" data-live="people">
+          <ul id="peopleLive" class="people-live"></ul>
+          <canvas id="lanes" aria-label="Who spoke when, last 2 minutes"></canvas>
+          <p id="lanesEmpty" class="muted">Each person gets a line here as soon as they talk.</p>
+        </div>
+        <div class="live-pane" data-live="view" hidden>
+          <img id="preview" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" alt="What the bot currently sees in the meeting" hidden>
+          <p class="muted" id="previewEmpty">Waiting for the first picture…</p>
+        </div>
+        <div class="live-pane" data-live="log" hidden>
+          <dl id="stats" class="stats"></dl>
+          <ol id="log" class="log"></ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- one recording -->
+    <section class="view" id="viewRec" data-for="record" hidden>
+      <article class="meeting-view">
+        <header class="meeting-header">
+          <h1 id="recTitle" dir="auto"></h1>
+          <button type="button" class="icon-button" id="recRename" aria-label="Rename"><i data-icon="pencil"></i></button>
+        </header>
+        <div class="meeting-meta" id="recMeta"></div>
+        <div class="rec-toolbar">
+          <details class="export-menu" id="exportMenu">
+            <summary><i data-icon="download"></i>Download</summary>
+            <div class="export-options" id="exportOptions"></div>
+          </details>
+          <button type="button" id="recWatch" hidden><i data-icon="video"></i><span>Watch with names</span></button>
+          <button type="button" id="recOpen"><i data-icon="files"></i><span class="show-in">Open folder</span></button>
+          <button type="button" class="quiet-danger" id="recDelete"><i data-icon="trash"></i>Delete</button>
+        </div>
+
+        <div class="video-box" id="videoBox" hidden></div>
+
+        <div class="tx-progress" id="txProg" hidden>
+          <div class="tx-row"><span class="tx-pct" id="txPct">0%</span><span class="tx-label" id="txLabel">Starting the transcriber…</span><button type="button" class="small" id="txCancel">Cancel</button></div>
+          <div class="tx-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Transcription progress"><span id="txBar"></span></div>
+        </div>
+        <p class="tx-error" id="txError" role="alert" hidden></p>
+
+        <div class="timeline" id="timeline" aria-label="Who spoke when"></div>
+
+        <section class="transcript" aria-labelledby="txHead">
+          <div class="transcript-head">
+            <h2 id="txHead">Transcript</h2>
+            <span class="muted" id="txMeta"></span>
+            <span class="spacer"></span>
+            <button type="button" class="small" id="copyRaw" title="Just what was said: no times, no names"><i data-icon="copy"></i>Copy without names</button>
+            <button type="button" class="small primary" id="copyAll"><i data-icon="copy"></i>Copy transcript</button>
+          </div>
+          <div class="tx-empty" id="txEmpty" hidden>
+            <p id="txEmptyText">No transcript yet.</p>
+            <button type="button" class="primary" id="transcribeBtn"><i data-icon="transcript"></i>Transcribe</button>
+          </div>
+          <div id="txBox">
+            <div class="transcript-tools">
+              <input id="txSearch" type="search" placeholder="Search the transcript" autocomplete="off">
+              <span class="muted" id="txMatches"></span>
+              <button type="button" class="small" id="txPrev">Previous</button>
+              <button type="button" class="small" id="txNext">Next</button>
+            </div>
+            <div class="speaker-filter" id="speakerFilter"></div>
+            <ol class="tx-lines" id="txLines"></ol>
+          </div>
+        </section>
+
+        <div class="audio-player" id="player">
+          <button type="button" class="icon-button play-btn" id="playBtn" aria-label="Play"><i data-icon="play"></i><i data-icon="pause"></i></button>
+          <button type="button" class="icon-button" id="back10" aria-label="Back 10 seconds"><i data-icon="back"></i></button>
+          <button type="button" class="icon-button" id="fwd10" aria-label="Forward 10 seconds"><i data-icon="forward"></i></button>
+          <span class="player-time" id="playerTime">0:00 / 0:00</span>
+          <input type="range" id="seek" min="0" max="1000" value="0" aria-label="Position">
+          <select id="speed" aria-label="Speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+          <audio id="audio" preload="none"></audio>
+        </div>
+      </article>
+    </section>
+
+    <!-- voice-overs -->
+    <section class="view" id="viewVoice" data-for="voice" hidden>
+      <h1 class="view-heading">Turn a script into a voice-over</h1>
+      <p class="hero-subtitle left">Paste your text, pick a voice on the left, press Create. Everything stays on this computer.</p>
+
+      <section id="voSetup" class="setup-card" hidden aria-live="polite">
+        <div>
+          <h2 id="voSetupTitle">Get the voices</h2>
+          <p id="voSetupText" class="muted"></p>
+        </div>
+        <div class="setup-act">
+          <button id="voSetupBtn" class="primary" type="button">Download the voices</button>
+          <div id="voSetupProg" class="tx-progress" hidden>
+            <div class="tx-row"><span class="tx-pct" id="voSetupPct">0%</span><span class="tx-label" id="voSetupLabel">Downloading…</span></div>
+            <div class="tx-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Download progress"><span id="voSetupBar"></span></div>
+          </div>
+        </div>
       </section>
 
-      <div class="booth">
-        <section class="room" aria-labelledby="peopleHead">
-          <div class="room-head">
-            <h2 id="peopleHead">Who's talking</h2>
-            <span id="peopleMeta" class="meta"></span>
-          </div>
-          <ul id="people" class="people"></ul>
-        </section>
-
-        <aside class="side">
-          <section class="window" aria-labelledby="viewHead">
-            <h2 id="viewHead">What the bot sees</h2>
-            <div class="view-frame"><img id="preview" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" alt="What the bot currently sees in the meeting" hidden><p class="empty" id="previewEmpty">Waiting for the first picture…</p></div>
-          </section>
-          <details class="details">
-            <summary>Files and activity</summary>
-            <dl id="stats" class="stats"></dl>
-            <ol id="log" class="log"></ol>
-          </details>
-        </aside>
-
-        <div class="lanes-wrap">
-          <div class="lanes-caption"><span>Who spoke when, last 2 minutes</span></div>
-          <canvas id="lanes" aria-label="Who spoke when, last 2 minutes"></canvas>
-          <p id="lanesEmpty" class="empty">Each person gets a line here as soon as they talk.</p>
+      <article class="meeting-view script-card">
+        <div class="script-head">
+          <h2>Script</h2>
+          <span id="voCount" class="muted"></span>
         </div>
-      </div>
+        <div class="vo-tools" role="toolbar" aria-label="Insert a pause">
+          <span class="muted">Insert a pause where the cursor is:</span>
+          <button class="small" type="button" data-pause="0.5">½ s</button>
+          <button class="small" type="button" data-pause="1">1 s</button>
+          <button class="small" type="button" data-pause="2">2 s</button>
+          <button class="small" type="button" data-pause="4">4 s</button>
+        </div>
+        <textarea id="voText" spellcheck="true" dir="auto" placeholder="Type or paste what should be said.&#10;&#10;Each sentence gets its own little pause; an empty line makes a longer one. For more, put the cursor where you want silence and press a pause button above, or type [pause 2s]."></textarea>
+        <div class="vo-go">
+          <button id="voGo" class="primary" type="button"><i data-icon="voices"></i>Create voice-over</button>
+          <span id="voSummary" class="muted"></span>
+        </div>
+        <div id="voError" class="form-error" role="alert"></div>
+        <div id="voProg" class="tx-progress" hidden>
+          <div class="tx-row"><span class="tx-pct" id="voPct">0%</span><span class="tx-label" id="voLabel">Starting the voice…</span><button id="voCancel" class="small" type="button">Cancel</button></div>
+          <div class="tx-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Voice-over progress"><span id="voBar"></span></div>
+        </div>
+        <div id="voResult" class="vo-result" hidden>
+          <div class="vo-result-head"><i data-icon="check"></i><strong>Ready</strong><span id="voResultMeta" class="muted"></span></div>
+          <div id="voPlayer"></div>
+          <div class="vo-result-act" id="voResultAct"></div>
+        </div>
+      </article>
     </section>
 
-
-    <!-- Past recordings -->
-    <section class="recordings" aria-labelledby="recHead">
-      <div class="rec-head">
-        <h2 id="recHead">Recordings</h2>
-        <div id="whisperInfo" class="whisper-info" aria-live="polite">
-          <span class="whisper-dot" aria-hidden="true"></span>
-          <span id="whisperText">Checking the transcriber…</span>
-          <select id="whisperModel" aria-label="Transcription model" hidden></select>
+    <!-- settings -->
+    <section class="view" id="viewSettings" data-for="settings" hidden>
+      <h1 class="view-heading">Models and storage</h1>
+      <section class="settings-card" aria-labelledby="txSetHead">
+        <h2 id="txSetHead">Transcriber model</h2>
+        <p id="whisperText" class="muted">Checking the transcriber…</p>
+        <div class="tx-progress" id="whisperProg" hidden>
+          <div class="tx-row"><span class="tx-pct" id="whisperPct">0%</span><span class="tx-label" id="whisperLabel">Downloading…</span></div>
+          <div class="tx-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Download progress"><span id="whisperBar"></span></div>
         </div>
-      </div>
-      <ul id="recList" class="rec-list"></ul>
-      <p id="recEmpty" class="empty-block" hidden>No recordings yet. Send the bot to a meeting or press Record.</p>
-    </section>
-    </div>
-
-    <!-- ======================= Voice-over ======================= -->
-    <section id="tabVoice" class="tab vo" role="tabpanel" aria-labelledby="tabBtnVoice" hidden>
-      <div class="vo-grid">
-        <div class="vo-left">
-          <div class="page-head">
-            <h1>Turn a script into a voice-over.</h1>
-            <p class="lede">Paste your text, pick a voice, press Create. Everything stays on this computer.</p>
-          </div>
-
-          <!-- first run: the voices are not on this computer yet -->
-          <section id="voSetup" class="vo-setup" hidden aria-live="polite">
-            <div>
-              <h2 id="voSetupTitle">Get the voices</h2>
-              <p id="voSetupText" class="module-text"></p>
-            </div>
-            <div class="vo-setup-act">
-              <button id="voSetupBtn" class="key key-primary" type="button">Download the voices</button>
-              <div id="voSetupProg" class="tx-progress" hidden>
-                <div class="tx-row"><span class="tx-pct" id="voSetupPct">0%</span><span class="tx-label" id="voSetupLabel">Downloading…</span></div>
-                <div class="tx-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Download progress"><span id="voSetupBar"></span></div>
-              </div>
-            </div>
-          </section>
-
-          <section class="vo-script" aria-labelledby="voScriptHead">
-            <div class="vo-head">
-              <h2 id="voScriptHead">Script</h2>
-              <span id="voCount" class="meta"></span>
-            </div>
-            <div class="vo-tools" role="toolbar" aria-label="Insert a pause">
-              <span class="hint">Insert a pause:</span>
-              <button class="key key-quiet key-sm" type="button" data-pause="0.5">½ s</button>
-              <button class="key key-quiet key-sm" type="button" data-pause="1">1 s</button>
-              <button class="key key-quiet key-sm" type="button" data-pause="2">2 s</button>
-              <button class="key key-quiet key-sm" type="button" data-pause="4">4 s</button>
-            </div>
-            <textarea id="voText" spellcheck="true" placeholder="Type or paste what should be said.&#10;&#10;Each sentence gets its own little pause; an empty line makes a longer one. For more, put the cursor where you want silence and press a pause button above, or type [pause 2s]."></textarea>
-          </section>
-
-          <section class="vo-act" aria-label="Make the voice-over">
-            <div class="vo-go">
-              <button id="voGo" class="key key-primary vo-create" type="button">Create voice-over</button>
-              <span id="voSummary" class="vo-summary"></span>
-              <p id="voError" class="form-error" role="alert"></p>
-            </div>
-            <div id="voProg" class="tx-progress" hidden>
-              <div class="tx-row">
-                <span class="tx-pct" id="voPct">0%</span>
-                <span class="tx-label" id="voLabel">Starting the voice…</span>
-                <button id="voCancel" class="key key-quiet key-sm" type="button">Cancel</button>
-              </div>
-              <div class="tx-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Voice-over progress"><span id="voBar"></span></div>
-            </div>
-            <div id="voResult" class="vo-result" hidden>
-              <div class="vo-result-head">
-                <span class="lamp-ok" aria-hidden="true"></span>
-                <strong>Ready</strong>
-                <span id="voResultMeta" class="meta"></span>
-              </div>
-              <div id="voPlayer"></div>
-              <div class="vo-result-act" id="voResultAct"></div>
-            </div>
-          </section>
-        </div>
-
-        <!-- the right column: voice, settings, your voice-overs -->
-        <aside class="vo-right" aria-label="Voice and settings">
-          <div class="seg" role="tablist" aria-label="Voice panel">
-            <button class="seg-btn" type="button" role="tab" data-pane="voice" aria-selected="true">Voice</button>
-            <button class="seg-btn" type="button" role="tab" data-pane="settings" aria-selected="false">Settings</button>
-            <button class="seg-btn" type="button" role="tab" data-pane="history" aria-selected="false">Your voice-overs</button>
-          </div>
-
-          <section class="pane vo-voice" data-pane="voice" aria-labelledby="voVoiceHead">
-            <h2 id="voVoiceHead" class="sr-only">Voice</h2>
-            <div id="voPresets" class="vo-presets" role="radiogroup" aria-labelledby="voVoiceHead"></div>
-            <div id="voCustom" class="vo-custom" hidden></div>
-            <details id="voMore" class="vo-more">
-              <summary>More voices and languages</summary>
-              <label class="field vo-lang">
-                <span>Language</span>
-                <select id="voLang"></select>
-              </label>
-              <p class="hint vo-lang-note">There is no Arabic voice yet: Kokoro does not speak Arabic.</p>
-              <div id="voExtra" class="vo-extra" hidden aria-live="polite"></div>
-              <ul id="voVoices" class="vo-voices" role="radiogroup" aria-label="Voices"></ul>
-            </details>
-          </section>
-
-          <section class="pane" data-pane="settings" hidden>
-            <details id="voAdv" class="vo-adv" open>
-              <summary>
-                <span>Settings for this voice</span>
-                <span id="voAdvNote" class="meta"></span>
-              </summary>
-              <div class="vo-adv-top">
-                <p class="hint">Every value starts at the chosen voice's own setting. Changes are marked; reset them one by one or all at once.</p>
-                <button id="voResetAll" class="key key-quiet key-sm" type="button">Reset all</button>
-              </div>
-              <div id="voAdvBody" class="vo-adv-body"></div>
-            </details>
-          </section>
-
-          <section class="pane vo-history" data-pane="history" aria-labelledby="voHistHead" hidden>
-            <h2 id="voHistHead" class="sr-only">Your voice-overs</h2>
-            <ul id="voList" class="vo-list"></ul>
-            <p id="voEmpty" class="empty-block" hidden>Nothing made yet. Your voice-overs will be listed here.</p>
-          </section>
-        </aside>
-      </div>
+        <div class="model-list" id="modelList" role="list"></div>
+        <p class="muted small-print">Each model is downloaded once and then works without the internet. You can keep several and pick one per recording on the left.</p>
+      </section>
+      <section class="settings-card" aria-labelledby="storeHead">
+        <h2 id="storeHead">Storage</h2>
+        <p class="muted" id="storeFree"></p>
+        <div id="storeList"></div>
+      </section>
+      <section class="settings-card" aria-labelledby="updHead">
+        <h2 id="updHead">Updates</h2>
+        <p class="muted" id="updateText2">ICAIRE Echo checks for a new version every few hours and updates itself when nothing is running.</p>
+        <button type="button" id="updateBtn2"><i data-icon="refresh"></i><span>Check for updates</span></button>
+      </section>
     </section>
   </main>
 
-  <dialog class="confirm" id="confirm" aria-labelledby="confirmTitle" aria-describedby="confirmText">
-    <form method="dialog">
-      <h2 id="confirmTitle"></h2>
-      <p id="confirmText"></p>
-      <div class="confirm-act">
-        <button class="key key-quiet" value="cancel" type="submit">Cancel</button>
-        <button class="key key-danger" id="confirmOk" value="ok" type="submit"></button>
-      </div>
-    </form>
-  </dialog>
+  <!-- ===== right: the list ===== -->
+  <aside class="rail" id="rail" aria-label="Lists">
+    <section class="rail-section" data-for="record settings">
+      <h2 class="rail-heading"><i data-icon="waves"></i>Previous recordings</h2>
+      <input id="recSearch" type="search" placeholder="Find a recording" autocomplete="off" aria-label="Find a recording">
+      <div id="recList" class="wave-list"></div>
+      <p id="recEmpty" class="rail-empty" hidden>No recordings yet. Press the microphone to make the first one.</p>
+    </section>
+    <section class="rail-section" data-for="voice" hidden>
+      <h2 class="rail-heading"><i data-icon="waves"></i>Your voice-overs</h2>
+      <ul id="voList" class="vo-list"></ul>
+      <p id="voEmpty" class="rail-empty" hidden>Nothing made yet. Your voice-overs are listed here.</p>
+    </section>
+  </aside>
 
-  <template id="recItem">
-    <li class="rec-item">
-      <div class="rec-top">
-        <div class="rec-title">
-          <span class="rec-kind"></span>
-          <h3 class="rec-when"></h3>
-          <div class="rec-facts"></div>
-        </div>
-        <div class="rec-primary">
-          <button class="key key-primary act-transcribe" type="button">Transcribe</button>
-        </div>
-      </div>
-      <div class="rec-speakers"></div>
-      <canvas class="rec-overview" aria-label="Who spoke when across the whole recording"></canvas>
-      <div class="tx-progress" hidden>
-        <div class="tx-row">
-          <span class="tx-pct">0%</span>
-          <span class="tx-label">Starting the transcriber…</span>
-          <button class="key key-quiet key-sm tx-cancel" type="button">Cancel</button>
-        </div>
-        <div class="tx-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Transcription progress"><span></span></div>
-      </div>
-      <p class="tx-error" role="alert" hidden></p>
-      <div class="rec-transcript" hidden>
-        <div class="tx-head">
-          <span class="tx-title">Transcript</span>
-          <span class="tx-meta"></span>
-          <button class="key key-quiet key-sm tx-copy-raw" type="button" title="Just what was said: no times, no names">Copy without names</button>
-          <button class="key key-primary key-sm tx-copy" type="button">Copy transcript</button>
-        </div>
-        <ol class="tx-lines"></ol>
-        <button class="tx-more" type="button" hidden>Show the whole transcript</button>
-      </div>
-      <div class="rec-actions">
-        <button class="key key-quiet key-sm act-watch" type="button">Watch with names</button>
-        <button class="key key-quiet key-sm act-open" type="button">Open folder</button>
-        <details class="rec-more">
-          <summary class="key key-quiet key-sm">Files</summary>
-          <div class="rec-files"></div>
-          <label class="key key-quiet key-sm act-merge">Use a transcript made elsewhere (.json, .srt, .vtt)<input type="file" accept=".json,.srt,.vtt" hidden></label>
-        </details>
-        <button class="key key-quiet key-sm act-delete" type="button">Delete</button>
-      </div>
-      <div class="rec-player" hidden></div>
-    </li>
-  </template>
+  <!-- ===== status bar ===== -->
+  <footer class="statusbar">
+    <span class="engine" id="engine"><span class="dot" aria-hidden="true"></span><span id="engineText">Checking the transcriber…</span></span>
+    <span class="statusbar-end">Saved on this computer</span>
+  </footer>
+</div>
 
-  <script src="/ui/app.js"></script>
-  <script src="/ui/voice.js"></script>
+<dialog class="confirm" id="confirm" aria-labelledby="confirmTitle" aria-describedby="confirmText">
+  <form method="dialog">
+    <h2 id="confirmTitle"></h2>
+    <p id="confirmText"></p>
+    <div class="dialog-actions">
+      <button value="cancel" type="submit">Cancel</button>
+      <button class="danger" id="confirmOk" value="ok" type="submit"></button>
+    </div>
+  </form>
+</dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="/ui/icons.js"></script>
+<script src="/ui/app.js"></script>
+<script src="/ui/voice.js"></script>
 </body>
 </html>

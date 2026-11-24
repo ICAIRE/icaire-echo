@@ -1,5 +1,5 @@
 'use strict';
-// The Voice-over tab: a script, a voice, one button. Every setting is under "Advanced settings".
+// Voice-overs: a script in the middle, the voice and its settings on the left, the ones you made on the right.
 // Uses the helpers from app.js ($, el, api, mmss, length, bytes, plural), which share the page's global scope.
 
 const VO = {
@@ -11,24 +11,10 @@ const VO = {
   audio: null, // the sample player
 };
 
-// ---------- tabs ----------
-function showTab() {
-  const voice = location.hash === '#voice';
-  $('tabTranscribe').hidden = voice;
-  $('tabVoice').hidden = !voice;
-  for (const [id, on] of [['tabBtnTranscribe', !voice], ['tabBtnVoice', voice]]) {
-    $(id).setAttribute('aria-selected', String(on));
-    $(id).tabIndex = on ? 0 : -1;
-  }
-  document.body.dataset.tab = voice ? 'voice' : 'transcribe';
-  if (voice && !VO.info) loadVoice();
-}
-window.addEventListener('hashchange', showTab);
-document.querySelector('.tabs').addEventListener('keydown', (e) => {
-  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-  location.hash = location.hash === '#voice' ? '#transcribe' : '#voice';
-  $(location.hash === '#voice' ? 'tabBtnVoice' : 'tabBtnTranscribe').focus();
-});
+// the router in app.js calls this when the Voice-overs page opens
+window.voiceShown = () => {
+  if (!VO.info) loadVoice();
+};
 
 // ---------- settings ----------
 const get = (o, k) => k.split('.').reduce((a, p) => (a == null ? a : a[p]), o);
@@ -64,12 +50,13 @@ function voiceLabel(id) {
   const l = langOf(id);
   return `${v ? v.name : id} · ${l.name} · ${id[1] === 'f' ? 'female' : 'male'}`;
 }
+// "Heart · Calm narrator pacing": the Kokoro voice by its own name, and the pacing it reads with
 function chosenName(presetId, voiceId) {
   const p = (VO.info && VO.info.presets.find((x) => x.id === presetId)) || null;
-  if (!p) return voiceId ? voiceLabel(voiceId) : '';
-  if (!voiceId || voiceId === p.settings.voice) return p.name;
-  const v = voiceOf(voiceId);
-  return `${v ? v.name : voiceId} (${langOf(voiceId).name}), ${p.name} settings`;
+  const id = voiceId || (p && p.settings.voice);
+  if (!id) return p ? p.name : '';
+  const v = voiceOf(id);
+  return `${v ? v.name : id}${p ? ` · ${p.name} pacing` : ''}`;
 }
 function effectiveLang() {
   const l = val('lang');
@@ -107,74 +94,75 @@ function playButton(label, body) {
   return b;
 }
 
-function renderPresets() {
-  const box = $('voPresets');
-  const custom = 'voice' in VO.changes;
-  box.replaceChildren(
-    ...VO.info.presets.map((p) => {
-      const on = p.id === VO.preset && !custom;
-      const card = el('div', { class: 'vo-preset' + (on ? ' on' : ''), role: 'radio', 'aria-checked': String(on), tabindex: on || (!custom ? p.id === VO.preset : p.recommended) ? '0' : '-1' });
-      card.append(
-        el('span', { class: 'key-top', 'aria-hidden': 'true' }, el('span', { class: 'led' }), p.recommended ? el('span', { class: 'ch' }, 'Recommended') : null),
-        el('span', { class: 'vo-preset-name' }, p.name),
-        el('span', { class: 'vo-preset-about' }, p.about),
-        playButton(`Play a sample of ${p.name}`, () => ({ preset: p.id }))
-      );
-      const pick = () => {
-        VO.preset = p.id;
-        VO.changes = {};
-        save();
-        renderAll();
-      };
-      card.addEventListener('click', pick);
-      card.addEventListener('keydown', (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), pick()));
-      return card;
-    })
+// One list for the language chosen on top: the recommended voices first. Search narrows it.
+function voiceRow({ on, name, tag, about, sample, pick, key }) {
+  const row = el('li', { class: 'voice-row' + (on ? ' on' : ''), role: 'radio', 'aria-checked': String(on), tabindex: on ? '0' : '-1', 'data-key': key });
+  row.append(
+    el('span', { class: 'led', 'aria-hidden': 'true' }),
+    el('span', { class: 'voice-text' }, el('span', { class: 'voice-name' }, name, tag ? el('span', { class: 'voice-tag' }, tag) : null), el('span', { class: 'voice-about' }, about)),
+    playButton('Play a sample of ' + name, sample)
   );
-  const c = $('voCustom');
-  c.hidden = !custom;
-  if (custom) {
-    c.replaceChildren(
-      el('span', { class: 'led on', 'aria-hidden': 'true' }),
-      el('span', {}, el('b', {}, voiceLabel(val('voice'))), el('span', { class: 'meta' }, ` with ${presetOf(VO.preset).name}'s settings`)),
-      playButton('Play a sample of this voice', () => ({ preset: VO.preset, changes: nest(VO.changes) })),
-      el('button', { class: 'key key-quiet key-sm', type: 'button', onclick: () => setVal('voice', base('voice')) }, `Back to ${presetOf(VO.preset).name}`)
-    );
-  }
+  row.addEventListener('click', pick);
+  row.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') (e.preventDefault(), pick());
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const rows = [...document.querySelectorAll('#voVoices .voice-row:not([hidden])')];
+      const next = rows[rows.indexOf(row) + (e.key === 'ArrowDown' ? 1 : -1)];
+      if (next) next.focus();
+    }
+  });
+  return row;
 }
 
-function renderVoices() {
-  const sel = $('voLang');
-  const cur = langOf(val('voice')).code;
+function renderVoiceList() {
+  // the pacing: how the chosen voice reads (pauses, speed, line by line or sentence by sentence)
+  const pace = $('voPacing');
+  if (!pace.options.length) pace.replaceChildren(...VO.info.presets.map((p) => el('option', { value: p.id }, p.name)));
+  pace.value = VO.preset;
+  $('voPacingAbout').textContent = presetOf(VO.preset).about;
+  // the language menu: starts at the chosen voice's language
+  const sel = $('voLangPick');
   if (!sel.options.length) {
-    sel.replaceChildren(...VO.info.languages.map((l) => el('option', { value: l.code }, `${l.name}, ${plural(VO.info.voices.filter((v) => v.id[0] === l.prefix).length, 'voice')}`)));
-    sel.value = cur;
-    sel.addEventListener('change', () => {
-      renderVoices();
-      renderExtra();
-    });
+    sel.replaceChildren(...VO.info.languages.filter((l) => VO.info.voices.some((v) => v.id[0] === l.prefix)).map((l) => el('option', { value: l.code }, l.name)));
+    sel.value = langOf(val('voice')).code;
   }
   const lang = VO.info.languages.find((l) => l.code === sel.value) || langOf(val('voice'));
-  const list = VO.info.voices.filter((v) => v.id[0] === lang.prefix).sort((a, b) => (b.best ? 1 : 0) - (a.best ? 1 : 0));
-  $('voVoices').replaceChildren(
-    ...list.map((v) => {
-      const on = val('voice') === v.id;
-      const li = el('li', { class: 'vo-v' + (on ? ' on' : ''), role: 'radio', 'aria-checked': String(on), tabindex: '0' });
-      li.append(
-        el('span', { class: 'led', 'aria-hidden': 'true' }),
-        el('span', { class: 'vo-v-name' }, v.name, v.best ? el('span', { class: 'best' }, 'clearest') : null),
-        el('span', { class: 'meta' }, v.id[1] === 'f' ? 'female' : 'male'),
-        playButton(`Play a sample of ${v.name}`, () => ({ preset: VO.preset, changes: nest({ ...VO.changes, voice: v.id, lang: 'auto' }) }))
-      );
-      const pick = () => {
+  const rows = [];
+  // Kokoro's voices by their own names, the clearest first
+  const list = VO.info.voices.filter((v) => v.id[0] === lang.prefix).sort((x, y) => (y.best ? 1 : 0) - (x.best ? 1 : 0));
+  for (const v of list) {
+    const sex = v.id[1] === 'f' ? 'Female' : 'Male';
+    rows.push(voiceRow({
+      key: [v.name, v.id, sex, v.best ? 'recommended clearest' : ''].join(' '),
+      on: val('voice') === v.id,
+      name: v.name,
+      tag: v.best ? 'Recommended' : '',
+      about: `${sex} · ${lang.name} · ${v.id}`,
+      sample: () => ({ preset: VO.preset, changes: nest({ ...VO.changes, voice: v.id, lang: 'auto' }) }),
+      pick: () => {
         delete VO.changes.lang;
         setVal('voice', v.id);
-      };
-      li.addEventListener('click', pick);
-      li.addEventListener('keydown', (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), pick()));
-      return li;
-    })
-  );
+      },
+    }));
+  }
+  $('voVoices').replaceChildren(...rows);
+  filterVoices();
+  const on = document.querySelector('#voVoices .voice-row.on');
+  if (on && !VO.listShown) {
+    VO.listShown = true;
+    on.scrollIntoView({ block: 'nearest' });
+  }
+  $('voChosen').textContent = chosenName(VO.preset, val('voice'));
+}
+function filterVoices() {
+  const q = $('voSearch').value.trim().toLowerCase();
+  let any = false;
+  for (const li of $('voVoices').children) {
+    li.hidden = !!q && !li.dataset.key.toLowerCase().includes(q);
+    if (!li.hidden) any = true;
+  }
+  $('voNone').hidden = any;
 }
 
 // ---------- advanced ----------
@@ -314,7 +302,7 @@ function pronEditor() {
       }
       grid.append(el('button', { class: 'reset', type: 'button', 'aria-label': 'Remove', onclick: () => setVal(k, rows.filter((_, j) => j !== i)) }, '×'));
     });
-    t.append(grid, el('button', { class: 'key key-quiet key-sm', type: 'button', onclick: () => setVal(k, [...rows.map((x) => [...x]), Array(n).fill('')]) }, 'Add one'));
+    t.append(grid, el('button', { class: 'small', type: 'button', onclick: () => setVal(k, [...rows.map((x) => [...x]), Array(n).fill('')]) }, 'Add one'));
     box.append(t);
   }
   return box;
@@ -373,13 +361,11 @@ function extraKeyFor(lang) {
 }
 function renderExtra(state) {
   const box = $('voExtra');
-  const browsing = $('voMore').open ? $('voLang').value : null;
-  const key = extraKeyFor(effectiveLang()) || (browsing && extraKeyFor(browsing));
+  const key = extraKeyFor(effectiveLang());
   const s = state || VO.extraState;
   const busy = !!(s && s.status === 'running');
   box.hidden = !key && !busy;
   const blocking = !!extraKeyFor(effectiveLang());
-  if (blocking && !$('voMore').open) $('voMore').open = true;
   $('voGo').disabled = blocking || !!(VO.job && ['loading', 'running', 'encoding'].includes(VO.job.status)) || document.body.hasAttribute('data-vo-locked');
   if (box.hidden) return;
   const k = busy ? s.key : key;
@@ -390,7 +376,7 @@ function renderExtra(state) {
   else
     kids.push(
       el('button', {
-        class: 'key key-primary key-sm',
+        class: 'small primary',
         type: 'button',
         onclick: () =>
           api('/api/voice/extra', { key: k })
@@ -403,8 +389,7 @@ function renderExtra(state) {
 
 function renderAll() {
   if (!VO.info || !VO.info.presets) return;
-  renderPresets();
-  renderVoices();
+  renderVoiceList();
   renderExtra();
   renderAdvanced();
   renderCount();
@@ -422,7 +407,7 @@ function renderSetup(setup) {
   const [n, u] = bytes(i.downloadBytes);
   $('voSetupTitle').textContent = needsEngine ? 'One more step to set up' : 'Get the voices';
   $('voSetupText').textContent = needsEngine
-    ? 'The voice engine is not installed on this computer yet. Close this window and open the app again with "Start Meet Recorder"; it installs it for you.'
+    ? 'The voice engine is not installed on this computer yet. Close this window and open the app again with "ICAIRE Echo"; it installs it for you.'
     : `The voices are one download of ${n} ${u}, once. After that everything works without the internet.`;
   $('voSetupBtn').hidden = needsEngine || (setup && setup.status === 'running');
   const prog = $('voSetupProg');
@@ -467,7 +452,7 @@ function downloads(id, files) {
     .map((f) => {
       const name = f.name || f;
       const ext = name.split('.').pop().toUpperCase();
-      return el('a', { class: 'key key-quiet key-sm', href: `/vo/${id}/${name}?download`, download: '' }, `Download ${ext}`, f.bytes ? el('span', { class: 'meta' }, ` ${bytes(f.bytes).join(' ')}`) : null);
+      return el('a', { class: 'small dl', href: `/vo/${id}/${name}?download`, download: '', title: `Download the ${ext} file` + (f.bytes ? ` (${bytes(f.bytes).join(' ')})` : '') }, icon('download'), ext);
     });
 }
 
@@ -476,7 +461,7 @@ function showResult(j) {
   const main = j.result.files.find((f) => f !== 'voice.wav') || 'voice.wav';
   $('voPlayer').replaceChildren(meterPlayer(`/vo/${j.id}/${main}`, j.result.duration));
   $('voResultMeta').textContent = `${length(j.result.duration)} · ${chosenName(j.preset || VO.preset, j.voice || val('voice'))}`;
-  $('voResultAct').replaceChildren(...downloads(j.id, j.result.files), el('button', { class: 'key key-quiet key-sm', type: 'button', 'data-open-folder': '', onclick: () => api('/api/vo-open/' + j.id).catch(() => {}) }, typeof SHOW_IN !== 'undefined' ? SHOW_IN : 'Open folder'));
+  $('voResultAct').replaceChildren(...downloads(j.id, j.result.files), el('button', { class: 'small', type: 'button', 'data-open-folder': '', onclick: () => api('/api/vo-open/' + j.id).catch(() => {}) }, typeof SHOW_IN !== 'undefined' ? SHOW_IN : 'Open folder'));
   box.hidden = false;
 }
 
@@ -487,7 +472,7 @@ function showError(raw) {
     : /not downloaded/.test(raw || '')
       ? 'The voices are not on this computer yet. Press "Download the voices" at the top of this page, then try again.'
       : /not installed/.test(raw || '')
-        ? 'The voice engine is not installed on this computer yet. Close this window, open the app again with "Start Meet Recorder" (it installs it), then try again.'
+        ? 'The voice engine is not installed on this computer yet. Close this window, open the app again with "ICAIRE Echo" (it installs it), then try again.'
         : 'The voice-over could not be made. Try again; if it keeps happening, try a shorter script or another voice.';
   box.replaceChildren(plain);
   if (raw && plain !== raw) box.append(el('details', { class: 'err-details' }, el('summary', {}, 'Details'), el('code', {}, raw)));
@@ -618,7 +603,7 @@ async function loadVoiceovers() {
   $('voEmpty').hidden = list.length > 0;
   $('voList').replaceChildren(
     ...list.map((v) => {
-      const when = new Date(v.id.replace(/^(\d{4}-\d\d-\d\d)-(\d\d)-(\d\d)-(\d\d)$/, '$1T$2:$3:$4Z'));
+      const when = new Date(v.id.replace(/^(\d{4}-\d\d-\d\d)-(\d\d)-(\d\d)-(\d\d)(?:-\d+)?$/, '$1T$2:$3:$4Z'));
       const main = (v.files.find((f) => f.name !== 'voice.wav') || v.files[0]).name;
       const li = el('li', { class: 'vo-item' });
       li.append(
@@ -633,21 +618,23 @@ async function loadVoiceovers() {
           'div',
           { class: 'rec-actions' },
           ...downloads(v.id, v.files),
-          el('button', { class: 'key key-quiet key-sm', type: 'button', 'data-open-folder': '', onclick: () => api('/api/vo-open/' + v.id).catch(() => {}) }, typeof SHOW_IN !== 'undefined' ? SHOW_IN : 'Open folder'),
+          el('button', { class: 'small icon-only', type: 'button', title: SHOW_IN, 'aria-label': SHOW_IN, onclick: () => api('/api/vo-open/' + v.id).catch(() => {}) }, icon('files')),
           el('button', {
-            class: 'key key-quiet key-sm vo-del',
+            class: 'small quiet-danger icon-only vo-del',
             type: 'button',
+            title: 'Delete',
+            'aria-label': 'Delete this voice-over',
             onclick: async () => {
               const sure = await confirmBox({ title: 'Delete this voice-over?', text: 'Its sound files and script are removed from this computer. This cannot be undone.', ok: 'Delete' });
               if (!sure) return;
               try {
                 await api('/api/vo-delete/' + v.id);
               } catch (err) {
-                alert(err.message);
+                toast(err.message);
               }
               loadVoiceovers();
             },
-          }, 'Delete')
+          }, icon('trash'))
         )
       );
       return li;
@@ -682,7 +669,21 @@ $('voText').addEventListener('input', () => {
   VO.saveT = setTimeout(save, 400);
 });
 $('voGo').addEventListener('click', create);
-$('voMore').addEventListener('toggle', () => VO.info && renderExtra());
+$('voSearch').addEventListener('input', filterVoices);
+// a new pacing keeps the voice you chose
+$('voPacing').addEventListener('change', () => {
+  const voice = val('voice');
+  VO.preset = $('voPacing').value;
+  VO.changes = {};
+  if (voice !== base('voice')) VO.changes.voice = voice;
+  save();
+  renderAll();
+});
+$('voLangPick').addEventListener('change', () => {
+  $('voSearch').value = '';
+  renderVoiceList();
+  $('voVoices').scrollTop = 0;
+});
 $('voCancel').addEventListener('click', () => api('/api/voice/cancel').catch(() => {}));
 $('voResetAll').addEventListener('click', () => {
   VO.changes = {};
@@ -716,16 +717,14 @@ window.onVoiceState = (data) => {
   if (data.voice) renderJob({ ...data.voice, voice: (VO.job && VO.job.voice) || undefined });
 };
 
-if (!location.hash) history.replaceState(null, '', '#transcribe');
-showTab();
 
 // the right column's three panes: Voice, Settings, Your voice-overs
 function showPane(name) {
-  document.querySelectorAll('.vo-right .seg-btn').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.pane === name)));
-  document.querySelectorAll('.vo-right .pane').forEach((p) => (p.hidden = p.dataset.pane !== name));
+  document.querySelectorAll('#voPanel .seg-btn').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.pane === name)));
+  document.querySelectorAll('#voPanel .pane').forEach((p) => (p.hidden = p.dataset.pane !== name));
   try { localStorage.setItem('mrb.voPane', name); } catch {}
 }
-document.querySelectorAll('.vo-right .seg-btn').forEach((b) => b.addEventListener('click', () => showPane(b.dataset.pane)));
+document.querySelectorAll('#voPanel .seg-btn').forEach((b) => b.addEventListener('click', () => showPane(b.dataset.pane)));
 try { const p = localStorage.getItem('mrb.voPane'); if (p) showPane(p); } catch {}
 
 // pause buttons: put "[pause 2s]" where the cursor is

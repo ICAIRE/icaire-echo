@@ -22,6 +22,7 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.png': 'image/png',
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
   '.wav': 'audio/wav',
@@ -79,7 +80,7 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
     if (job && job.active) throw Object.assign(new Error('Already transcribing another recording. Wait for it or cancel it.'), { code: 409 });
     const w = await whisperDetect();
     if (!w.available) throw Object.assign(new Error(w.reason || 'Whisper is not available.'), { code: 400 });
-    const model = w.models.find((m) => m.name === modelName) || w.models[0];
+    const model = w.models.find((m) => m.name === modelName) || w.models.find((m) => m.name === chosenModel(w)) || w.models[0];
     // a recording with no speaker log (made with Record) gets one from the voices; a bot recording has Meet's
     let meta = {};
     try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch {}
@@ -116,6 +117,9 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
         const files = fs.readdirSync(dir).map((f) => ({ name: f, bytes: fs.statSync(path.join(dir, f)).size }));
         return {
           id: d.name,
+          title: meta.title || '',
+          source: meta.source || '',
+          people: meta.people || null,
           startedAt: meta.startedAt || null,
           durationSec: meta.durationSec || 0,
           meetUrl: meta.meetUrl || '',
@@ -234,7 +238,133 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
     for (let i = 0; i < 40 && spawnSync('pgrep', ['-f', `user-data-dir=${PROFILE}`]).status === 0; i++) await new Promise((r) => setTimeout(r, 250));
   }
 
+  // a folder name from the time, made unique: two made within the same second must not share a folder
+  function freshId(root) {
+    const base = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+    let id = base;
+    for (let n = 2; fs.existsSync(path.join(root, id)) || (voiceJob && voiceJob.id === id) || local.has(id); n++) id = `${base}-${n}`;
+    return id;
+  }
   const recDir = (id) => (/^[\w-]+$/.test(id || '') ? path.join(outRoot, id) : null);
+
+  // small choices kept between runs (which transcriber model to use), in models/settings.json
+  const PREFS = path.join(ROOT, 'models', 'settings.json');
+  const readPrefs = () => { try { return JSON.parse(fs.readFileSync(PREFS, 'utf8')); } catch { return {}; } };
+  function writePrefs(change) {
+    fs.mkdirSync(path.dirname(PREFS), { recursive: true });
+    fs.writeFileSync(PREFS, JSON.stringify({ ...readPrefs(), ...change }, null, 2));
+  }
+  // the model transcripts use: the one chosen, if it is still here; otherwise the strongest one here
+  const chosenModel = (w) => {
+    const pick = readPrefs().whisperModel;
+    return w.models.some((m) => m.name === pick) ? pick : (w.models[0] && w.models[0].name) || null;
+  };
+
+  // a recording's own name, kept in its meta.json
+  const cleanTitle = (t) => String(t || '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+  function setTitle(dir, title) {
+    const file = path.join(dir, 'meta.json');
+    let meta = {};
+    try { meta = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+    meta.title = cleanTitle(title);
+    if (!meta.title) delete meta.title;
+    fs.writeFileSync(file + '.tmp', JSON.stringify(meta, null, 2));
+    fs.renameSync(file + '.tmp', file);
+    return meta.title || '';
+  }
+
+  // The shape of a recording for the list: 120 loudness bars, each with the speaker heard most in it.
+  // Read straight from audio.wav (16-bit) and kept in memory until the files change.
+  const peaksCache = new Map();
+  function peaksOf(dir, bars = 120) {
+    const audio = path.join(dir, 'audio.wav');
+    const spk = path.join(dir, 'speakers.json');
+    const mtime = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
+    const key = `${dir}:${mtime(audio)}:${mtime(spk)}`;
+    if (peaksCache.has(key)) return peaksCache.get(key);
+    const b = fs.readFileSync(audio);
+    let data = null;
+    let rate = 16000;
+    let channels = 1;
+    for (let p = 12; p + 8 <= b.length; ) {
+      const id = b.toString('ascii', p, p + 4);
+      const size = b.readUInt32LE(p + 4);
+      if (id === 'fmt ') { channels = b.readUInt16LE(p + 10); rate = b.readUInt32LE(p + 12); }
+      if (id === 'data') { data = b.subarray(p + 8, Math.min(b.length, p + 8 + size)); break; }
+      p += 8 + size + (size & 1);
+    }
+    const frames = data ? Math.floor(data.length / (2 * channels)) : 0;
+    const per = Math.max(1, Math.floor(frames / bars));
+    const rms = [];
+    for (let i = 0; i < bars && frames; i++) {
+      let s = 0;
+      let n = 0;
+      // every 4th sample is plenty for a picture
+      for (let f = i * per; f < Math.min(frames, (i + 1) * per); f += 4, n++) {
+        const x = data.readInt16LE(f * channels * 2) / 32768;
+        s += x * x;
+      }
+      rms.push(n ? Math.sqrt(s / n) : 0);
+    }
+    const top = Math.max(...rms, 1e-6);
+    const peaks = rms.map((x) => Math.round(Math.sqrt(x / top) * 100) / 100);
+    let speakers = [];
+    try {
+      const segs = JSON.parse(fs.readFileSync(spk, 'utf8')).segments || [];
+      const order = [...new Set([...segs].sort((a, b) => a.start - b.start).map((g) => g.speaker))];
+      const secs = frames / rate;
+      speakers = peaks.map((_, i) => {
+        const t0 = (i / bars) * secs;
+        const t1 = ((i + 1) / bars) * secs;
+        const heard = new Map();
+        for (const g of segs) {
+          const o = Math.min(t1, g.end) - Math.max(t0, g.start);
+          if (o > 0) heard.set(g.speaker, (heard.get(g.speaker) || 0) + o);
+        }
+        if (!heard.size) return null;
+        const top = [...heard].sort((a, b) => b[1] - a[1])[0][0];
+        return order.indexOf(top);
+      });
+    } catch {}
+    const out = { peaks, speakers };
+    peaksCache.set(key, out);
+    return out;
+  }
+
+  // what is taking space on this computer: the models, the recordings, the voice-overs
+  const sizeOf = (p) => {
+    try {
+      const st = fs.statSync(p);
+      if (!st.isDirectory()) return st.size;
+      return fs.readdirSync(p).reduce((a, f) => a + sizeOf(path.join(p, f)), 0);
+    } catch { return 0; }
+  };
+  const MODELS = path.join(ROOT, 'models');
+  function storage() {
+    const items = [];
+    const wdir = path.join(MODELS, 'whisper');
+    for (const f of fs.existsSync(wdir) ? fs.readdirSync(wdir).filter((f) => /^ggml-.*\.bin$/.test(f)) : []) {
+      const key = f.replace(/^ggml-|\.bin$/g, '');
+      const d = whisper.DOWNLOADS[key];
+      items.push({ key: 'whisper:' + f, name: 'Transcriber model: ' + (d ? `${d.title} (${key})` : key), about: 'Writes the transcripts. You can download it again from the list above.', bytes: sizeOf(path.join(wdir, f)), removable: true });
+    }
+    items.push({ key: 'speakers', name: 'Speaker models', about: 'Tell the voices apart in Record recordings.', bytes: sizeOf(path.join(MODELS, 'speakers')), removable: true });
+    items.push({ key: 'kokoro', name: 'Voices (Kokoro)', about: 'Make the voice-overs.', bytes: sizeOf(path.join(MODELS, 'kokoro')), removable: true });
+    items.push({ key: 'voice-extras', name: 'Japanese and Chinese for the voices', about: 'Only needed for those languages.', bytes: sizeOf(path.join(MODELS, 'voice-extras')), removable: true });
+    items.push({ key: 'kokoro-cache', name: 'Voice-over cache', about: 'Speeds up making the same lines again. Safe to clear.', bytes: sizeOf(path.join(MODELS, 'kokoro-cache')), removable: true });
+    let free = null;
+    try { const s = fs.statfsSync(ROOT); free = s.bavail * s.bsize; } catch {}
+    return { free, models: items.filter((x) => x.bytes > 0), recordings: sizeOf(outRoot), voiceovers: sizeOf(voiceRoot), folder: ROOT };
+  }
+  function removeStored(key) {
+    const target = key.startsWith('whisper:') && /^whisper:ggml-[\w.-]+\.bin$/.test(key)
+      ? path.join(MODELS, 'whisper', key.slice(8))
+      : ['speakers', 'kokoro', 'voice-extras', 'kokoro-cache'].includes(key) ? path.join(MODELS, key) : null;
+    if (!target || !fs.existsSync(target)) throw Object.assign(new Error('Nothing to remove.'), { code: 404 });
+    fs.rmSync(target, { recursive: true, force: true });
+    if (key.startsWith('whisper:')) whisperDetect({ refresh: true }).catch(() => {});
+    if (key === 'kokoro' || key === 'voice-extras') voiceDetect({ refresh: true }).catch(() => {});
+  }
 
   const server = http.createServer(async (req, res) => {
     // Only answer to this machine's own browser (blocks DNS-rebinding and cross-site requests).
@@ -260,15 +390,48 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
       }
       if (req.method === 'GET' && p === '/api/state') return json(res, 200, { ...payload(), recordings: listRecordings() });
       if (req.method === 'GET' && p === '/api/recordings') return json(res, 200, listRecordings());
+      if (req.method === 'GET' && p === '/api/storage') return json(res, 200, storage());
+      if (req.method === 'POST' && p === '/api/storage/remove') {
+        if (!idle()) return json(res, 409, { error: 'Finish the recording or the job that is running first.' });
+        const body = await readBody(req);
+        try { removeStored(String(body.key || '')); } catch (e) { return json(res, e.code || 500, { error: e.message }); }
+        return json(res, 200, storage());
+      }
+      if (req.method === 'POST' && p === '/api/storage/open') {
+        const which = (await readBody(req)).which;
+        const dir = which === 'recordings' ? outRoot : which === 'voiceovers' ? voiceRoot : MODELS;
+        fs.mkdirSync(dir, { recursive: true });
+        if (!runOptions.noOpen) openFolder(dir);
+        return json(res, 200, { ok: true, dir });
+      }
       if (req.method === 'GET' && p === '/api/whisper') {
         const w = await whisperDetect({ refresh: url.searchParams.has('refresh') });
-        return json(res, 200, { ...w, models: w.models.map(({ name, repo, bytes }) => ({ name, repo, bytes })) });
+        const have = new Set(w.models.map((m) => m.name));
+        const best = w.device === 'cuda' ? 'large-v3' : 'large-v3-turbo';
+        return json(res, 200, {
+          ...w,
+          models: w.models.map(({ name, repo, bytes }) => ({ name, repo, bytes })),
+          chosen: chosenModel(w),
+          // the models that can be downloaded, with what each is good for
+          catalog: Object.entries(whisper.DOWNLOADS).map(([key, d]) => ({ key, title: d.title, about: d.about, bytes: d.bytes, installed: have.has(key), recommended: key === best })),
+        });
+      }
+      if (req.method === 'POST' && p === '/api/whisper/choose') {
+        const w = await whisperDetect();
+        const name = String((await readBody(req)).model || '');
+        if (!w.models.some((m) => m.name === name)) return json(res, 400, { error: 'That model is not on this computer yet. Download it first.' });
+        writePrefs({ whisperModel: name });
+        return json(res, 200, { chosen: name });
       }
       if (req.method === 'POST' && p === '/api/whisper/setup') {
         const w = await whisperDetect();
         if (!w.engine) return json(res, 400, { error: w.reason });
+        const choice = String((await readBody(req)).model || '');
+        if (choice && !whisper.DOWNLOADS[choice]) return json(res, 400, { error: 'Unknown model.' });
         if (!whisperSetup.active) {
-          whisperSetup.run(w.device === 'cuda').then(async () => {
+          whisperSetup.run(w.device === 'cuda', choice).then(async () => {
+            // a model chosen and downloaded becomes the one used
+            if (choice && whisperSetup.status === 'done') writePrefs({ whisperModel: choice });
             await whisperDetect({ refresh: true }).catch(() => {});
             broadcast();
           });
@@ -313,7 +476,9 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
         current = new BotRun({ ...runOptions, outRoot, url: u.toString(), name, show: !!body.show || !!body.talk, talk: !!body.talk });
         current.on('update', broadcast);
         const run = current;
+        const title = cleanTitle(body.title);
         run.run().then(() => {
+          if (title && run.outDir && fs.existsSync(run.outDir)) try { setTitle(run.outDir, title); } catch {}
           broadcast();
           // the transcript is the payoff: start it as soon as the meeting is saved
           if (autoTranscribe && run.status === 'done') startTranscription(run.id).catch(() => {});
@@ -357,7 +522,7 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
         if (!d.available) return json(res, 400, { error: d.reason });
         const missing = needsExtra(kokoro.settingsFor(body.preset, body.changes));
         if (missing) return json(res, 400, { error: missing.message, needsExtra: missing.key });
-        const id = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+        const id = freshId(voiceRoot);
         voiceJob = new kokoro.VoiceJob({ id, text, preset: String(body.preset || 'presenter'), settings: kokoro.settingsFor(body.preset, body.changes), outDir: path.join(voiceRoot, id), modelDir: d.modelDir });
         voiceJob.on('update', broadcast);
         const mine = voiceJob;
@@ -431,6 +596,16 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
         if (!runOptions.noOpen) openFolder(dir);
         return json(res, 200, { ok: true, dir });
       }
+      if (req.method === 'GET' && (m = /^\/api\/peaks\/([\w-]+)$/.exec(p))) {
+        const dir = recDir(m[1]);
+        if (!dir || !fs.existsSync(path.join(dir, 'audio.wav'))) return json(res, 404, { error: 'not found' });
+        try { return json(res, 200, peaksOf(dir)); } catch (e) { return json(res, 500, { error: e.message }); }
+      }
+      if (req.method === 'POST' && (m = /^\/api\/rec-title\/([\w-]+)$/.exec(p))) {
+        const dir = recDir(m[1]);
+        if (!dir || !fs.existsSync(dir)) return json(res, 404, { error: 'not found' });
+        return json(res, 200, { title: setTitle(dir, (await readBody(req)).title) });
+      }
       if (req.method === 'POST' && (m = /^\/api\/rec-delete\/([\w-]+)$/.exec(p))) {
         const dir = recDir(m[1]);
         if (!dir || !fs.existsSync(dir)) return json(res, 404, { error: 'not found' });
@@ -473,12 +648,12 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
       // Record without a meeting: the panel records this computer's microphone (and the call's sound, when shared) and streams it here in chunks,
       // so a closed tab loses at most the last few seconds. Finish converts it to audio.wav and transcribes it.
       if (req.method === 'POST' && p === '/api/local/start') {
-        const id = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+        const id = freshId(outRoot);
         const dir = path.join(outRoot, id);
         fs.mkdirSync(dir, { recursive: true });
         const body = await readBody(req);
         const people = Math.round(Number(body.people)); // how many people talk, when the person said so
-        local.set(id, { startedAt: new Date().toISOString(), mime: String(body.mime || 'audio/webm').slice(0, 80), source: body.source === 'microphone+computer' ? 'microphone+computer' : 'microphone', people: people >= 1 && people <= 20 ? people : null });
+        local.set(id, { startedAt: new Date().toISOString(), title: cleanTitle(body.title), mime: String(body.mime || 'audio/webm').slice(0, 80), source: body.source === 'microphone+computer' ? 'microphone+computer' : 'microphone', people: people >= 1 && people <= 20 ? people : null });
         fs.writeFileSync(path.join(dir, 'audio.part'), '');
         return json(res, 200, { id });
       }
@@ -503,7 +678,7 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
         if (!ok) return json(res, 500, { error: 'Could not convert the recording to audio.wav. The raw file is kept as audio.part.' });
         fs.unlinkSync(part);
         const durationSec = Math.max(0, Number(body.durationMs) || 0) / 1000;
-        fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ kind: 'local', source: rec.source, startedAt: rec.startedAt, durationSec, people: rec.people }, null, 2));
+        fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ kind: 'local', ...(rec.title ? { title: rec.title } : {}), source: rec.source, startedAt: rec.startedAt, durationSec, people: rec.people }, null, 2));
         let transcribe = null;
         if (body.transcribe !== false) {
           try { transcribe = await startTranscription(m[1], {}); } catch (e) { transcribe = { error: e.message }; }

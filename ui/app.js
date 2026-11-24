@@ -1,57 +1,45 @@
 'use strict';
-// Meet Recorder control panel. Live meeting state arrives over Server-Sent Events from /api/stream.
-// "Record here" records this computer's microphone, plus (when "Also record the people in my call" is on)
-// the computer's own sound shared through the browser's screen-share picker, mixed into one track and
-// streamed to the server in chunks.
+// ICAIRE Echo: the panel. Three columns: details on the left, the work in the middle, the list on the right.
+// Live state (the bot, the transcriber, downloads, updates) arrives over Server-Sent Events from /api/stream.
+// "On this computer" records the microphone, plus the call's sound when it is shared through the browser's
+// share picker, mixed into one track and streamed to the server in chunks.
 
 const $ = (id) => document.getElementById(id);
-// Speaker colours, readable on the light console face and on the dark variant.
-const PALETTE = ['#2f6fdb', '#0f8a7e', '#8a4fe0', '#d0621f', '#c23b7a', '#2e9a4a', '#b88a12', '#5560d8', '#1590a8', '#a35a2a', '#9c3fb5', '#5f8a1a'];
 const STATUS = {
   starting: ['Starting the bot', 'Opening its own browser'],
   joining: ['Joining the meeting', ''],
   waiting: ['Waiting to be let in', 'Someone in the meeting needs to click "Admit"'],
-  recording: ['In the meeting, recording', ''],
+  recording: ['Recording', ''],
   stopping: ['Stopping', 'Leaving the meeting'],
-  processing: ['Saving the files', 'Making the video, audio and speaker list'],
+  processing: ['Saving', 'Making the audio and the speaker list'],
   done: ['Saved', ''],
   error: ["Couldn't record", ''],
   cancelled: ['Cancelled', ''],
 };
-const TOP = {
-  idle: 'Not recording',
-  starting: 'Starting',
-  joining: 'Joining the meeting',
-  waiting: 'Waiting to be let in',
-  recording: 'Recording',
-  stopping: 'Stopping',
-  processing: 'Saving',
-  done: 'Saved',
-  error: "Couldn't record",
-  cancelled: 'Cancelled',
-};
+// speaker colours, the same order everywhere: on the dark list, and on the white pages
+const WAVE = ['#A8D66D', '#6FC6CF', '#C3A0E8', '#EDB677', '#E6899C', '#82A5E8', '#D4CC7B', '#81C7A9'];
+// the same colours on every surface (all of them dark)
+const INK = WAVE;
+const MAC = /Mac/.test(navigator.platform || navigator.userAgent);
+const WIN = /Win/.test(navigator.platform || navigator.userAgent);
+const SHOW_IN = MAC ? 'Show in Finder' : WIN ? 'Show in File Explorer' : 'Open folder';
 
-let snap = null;
+let snap = null; // the bot's run
 let receivedAt = 0;
-let dismissedId = null;
 let lastStatus = null;
 let lastPreviewAt = 0;
 let lastElapsed = -1;
 let lastElapsedAt = 0;
-let local = null; // microphone recording in progress
-let localDone = null; // summary of the last microphone recording
-const colorByKey = new Map();
-const colorOf = (key) => {
-  if (!colorByKey.has(key)) colorByKey.set(key, PALETTE[colorByKey.size % PALETTE.length]);
-  return colorByKey.get(key);
-};
+let local = null; // a recording on this computer, in progress
+let recordings = [];
+let whisper = null;
+let tx = null; // the transcription in progress (or the last one)
+let update = null;
+let mode = 'local';
+let current = null; // the open recording: { id, rec, turns, speakers, text }
 
 // ---------- helpers ----------
 const pad = (n) => String(n).padStart(2, '0');
-function clock(sec) {
-  sec = Math.max(0, Math.floor(sec));
-  return `${pad(Math.floor(sec / 3600))}:${pad(Math.floor((sec % 3600) / 60))}:${pad(sec % 60)}`;
-}
 function mmss(sec) {
   sec = Math.max(0, Math.round(sec));
   const h = Math.floor(sec / 3600);
@@ -74,31 +62,55 @@ const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 function el(tag, props = {}, ...kids) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
+    if (v == null || v === false) continue;
     if (k === 'class') e.className = v;
     else if (k === 'style') e.style.cssText = v;
     else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
-    else e.setAttribute(k, v);
+    else e.setAttribute(k, v === true ? '' : v);
   }
-  for (const k of kids) if (k != null) e.append(k);
+  for (const k of kids) if (k != null && k !== false) e.append(k);
   return e;
 }
 async function api(path, body) {
-  const r = await fetch(path, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-mrb': '1' },
-    body: JSON.stringify(body || {}),
-  });
+  const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-mrb': '1' }, body: JSON.stringify(body || {}) });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `Request failed (${r.status})`);
   return data;
 }
 const css = (name) => getComputedStyle(document.body).getPropertyValue(name).trim();
-// recorded time of a Record recording: wall time since it started, less the time it spent paused
+function toast(text) {
+  const t = $('toast');
+  t.textContent = text;
+  t.classList.add('visible');
+  clearTimeout(t._t);
+  t._t = setTimeout(() => t.classList.remove('visible'), 2600);
+}
+const when = (iso, long) => {
+  const d = iso ? new Date(iso) : null;
+  if (!d || isNaN(d)) return '';
+  return d.toLocaleString([], long ? { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' } : { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+};
+const titleOf = (r) => r.title || (r.kind === 'local' ? 'Recording' : 'Google Meet') + (r.startedAt ? ', ' + new Date(r.startedAt).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '');
+async function copy(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = el('textarea', { style: 'position:fixed;opacity:0' });
+    ta.value = text;
+    document.body.append(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+}
+// recorded time of a recording on this computer: wall time since it started, less the time it spent paused
 const localElapsedMs = (me) => (me.pausedAt || performance.now()) - me.t0 - (me.pausedMs || 0);
 const nowSec = () => {
   if (local) return localElapsedMs(local) / 1000;
   return snap ? (snap.elapsedMs + (snap.status === 'recording' ? performance.now() - receivedAt : 0)) / 1000 : 0;
 };
+const isLive = () => !!local || !!(snap && snap.active);
+const txBusy = () => !!(tx && ['loading', 'separating', 'running', 'merging'].includes(tx.status));
 function fitCanvas(canvas, H) {
   const dpr = window.devicePixelRatio || 1;
   const W = canvas.clientWidth || canvas.parentElement.clientWidth;
@@ -113,355 +125,356 @@ function fitCanvas(canvas, H) {
   c.clearRect(0, 0, W, h);
   return [c, W, h];
 }
+for (const n of document.querySelectorAll('.show-in')) n.textContent = n.closest('#openRecordings') ? (MAC ? 'Open recordings in Finder' : WIN ? 'Open recordings in File Explorer' : 'Open recordings folder') : SHOW_IN;
 
-// ---------- live waveform, like a voice recorder ----------
-// values: sound level every 100 ms (0-1000 = RMS x 1000), the last one at time `end` (seconds).
-function drawWave(canvas, values, end, now) {
-  const [c, W, H] = fitCanvas(canvas);
-  // about 4 px per 100 ms bar: 30 s on a wide screen, less on a phone
-  const WAVE_SEC = Math.max(8, Math.min(30, Math.round(W / 40)));
-  const mid = Math.round(H / 2) - 6;
-  const labelY = H - 2;
-  const half = mid - 2;
-  const start = now - WAVE_SEC;
-  const X = (t) => ((t - start) / WAVE_SEC) * (W - 2);
-  // centre line
-  c.fillStyle = css('--wave-label');
-  c.fillRect(0, mid, W, 1);
-  const ink = css('--wave-ink');
-  const barW = Math.max(1.5, Math.min(3, (W / (WAVE_SEC * 10)) * 0.62));
-  c.fillStyle = ink;
-  for (let i = values.length - 1; i >= 0; i--) {
-    const t = end - (values.length - 1 - i) * 0.1;
-    if (t < start) break;
-    if (t > now) continue;
-    const v = values[i];
-    const db = v > 0 ? 20 * Math.log10(v / 1000) : -120;
-    const mag = Math.max(0, Math.min(1, (db + 54) / 48));
-    const h = Math.max(1, mag * half);
-    const x = X(t) - barW;
-    c.globalAlpha = 0.35 + 0.65 * Math.min(1, (t - start) / 6); // older sound fades at the left edge
-    c.beginPath();
-    c.roundRect ? c.roundRect(x, mid - h, barW, h * 2 + 1, barW / 2) : c.rect(x, mid - h, barW, h * 2 + 1);
-    c.fill();
+// ---------- where we are ----------
+function where() {
+  const [view, id] = (location.hash.slice(1) || 'record').split('/');
+  if (view === 'rec' && id) return { family: 'record', page: 'rec', id: decodeURIComponent(id) };
+  if (view === 'voice') return { family: 'voice', page: 'voice' };
+  if (view === 'settings') return { family: 'settings', page: 'settings' };
+  return { family: 'record', page: isLive() ? 'live' : 'home' };
+}
+
+function route() {
+  const w = where();
+  document.getElementById('app').dataset.view = w.page;
+  $('viewHome').hidden = w.page !== 'home';
+  $('viewLive').hidden = w.page !== 'live';
+  $('viewRec').hidden = w.page !== 'rec';
+  $('viewVoice').hidden = w.page !== 'voice';
+  $('viewSettings').hidden = w.page !== 'settings';
+  for (const p of document.querySelectorAll('.inspector .panel')) p.hidden = p.dataset.for !== w.family;
+  for (const s of document.querySelectorAll('.rail-section')) s.hidden = !s.dataset.for.split(' ').includes(w.family);
+  for (const a of document.querySelectorAll('.view-link')) {
+    const on = a.dataset.view === (w.family === 'voice' ? 'voice' : w.family === 'record' ? 'record' : '');
+    if (on) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
   }
-  c.globalAlpha = 1;
-  // playhead
-  c.fillStyle = css('--wave-mark');
-  c.fillRect(W - 2, 2, 2, mid * 2 - 4);
-  // time marks
-  c.font = '12px ' + getComputedStyle(document.body).fontFamily;
-  c.fillStyle = css('--wave-label');
-  c.textBaseline = 'bottom';
-  const every = WAVE_SEC > 20 ? 10 : 5;
-  for (let s = every; s <= WAVE_SEC; s += every) {
-    const x = X(now - s);
-    c.fillText(`-${s} s`, Math.max(0, x), labelY);
+  $('appMenu').open = false;
+  // the left card: setup before a recording, the recording's details when one is open
+  const open = w.page === 'rec';
+  $('recTabs').hidden = !open;
+  $('setupBody').hidden = open;
+  if (!open) {
+    $('infoBody').hidden = true;
+    $('peopleBody').hidden = true;
+    $('recCardTitle').textContent = w.page === 'live' ? 'This recording' : 'Recording details';
+    setupLocked(w.page === 'live');
+  } else showRecTab(currentRecTab);
+  markSelected();
+  if (w.page === 'rec') openRecording(w.id);
+  else closeRecording();
+  if (w.page === 'voice' && window.voiceShown) window.voiceShown();
+  if (w.page === 'settings') loadStorage();
+  if (w.page === 'home') renderReadiness();
+}
+window.addEventListener('hashchange', route);
+
+// ---------- recording mode: on this computer, or the bot ----------
+function setMode(m) {
+  mode = m === 'bot' ? 'bot' : 'local';
+  try { localStorage.setItem('echo.mode', mode); } catch {}
+  for (const b of document.querySelectorAll('.mode [data-mode]')) b.setAttribute('aria-checked', String(b.dataset.mode === mode));
+  for (const s of document.querySelectorAll('#setupBody [data-mode]')) s.hidden = s.dataset.mode !== mode;
+  // the link box keeps its place in both modes, so nothing below it moves
+  $('joinForm').toggleAttribute('inert', mode !== 'bot');
+  document.body.dataset.mode = mode;
+  $('bigBtn').setAttribute('aria-label', mode === 'bot' ? 'Send the bot to the meeting' : 'Start recording');
+  $('bigCaption').textContent = mode === 'bot' ? 'Tap to send the bot' : 'Tap to start recording';
+  $('bigHint').textContent = mode === 'bot' ? 'It joins as a guest; let it in from Meet.' : `${MAC ? '⌘' : 'Ctrl+'}⇧R to record`;
+  $('startError').textContent = '';
+  renderReadiness();
+}
+for (const b of document.querySelectorAll('.mode [data-mode]')) b.addEventListener('click', () => setMode(b.dataset.mode));
+function setupLocked(live) {
+  for (const n of document.querySelectorAll('#setupBody input, #setupBody select')) n.disabled = live && n.id !== 'newTitle';
+  $('setupNote').textContent = live ? 'The title is saved with the recording when it ends.' : 'Set these before you start, or leave them as they are.';
+}
+
+// ---------- home: readiness under the button ----------
+async function renderReadiness() {
+  const items = [];
+  const item = (ok, text, warn) => el('span', { class: ok ? 'ok' : warn ? 'warn' : '' }, icon(ok ? 'check' : 'info'), text);
+  if (mode === 'local') {
+    let mic = null;
+    try { mic = (await navigator.permissions.query({ name: 'microphone' })).state; } catch {}
+    items.push(item(mic === 'granted', mic === 'granted' ? 'Microphone allowed' : mic === 'denied' ? 'Microphone blocked in this browser' : 'Asks for the microphone', mic === 'denied'));
+    items.push(item($('localCall').checked, $('localCall').checked ? 'Call sound: on' : 'Call sound: off'));
+  } else {
+    items.push(item($('show').checked || $('talk').checked, $('talk').checked ? 'You talk through the bot' : $('show').checked ? "The bot's window shows" : 'The bot works out of sight'));
+    items.push(item(true, `Joins as "${$('name').value.trim() || 'Recorder'}"`));
   }
-  const w = c.measureText('now').width;
-  c.fillText('now', W - w - 4, labelY);
+  if (whisper) items.push(item(whisper.available, whisper.available ? 'Transcriber ready' : 'Transcriber needs its model', !whisper.available));
+  $('readiness').replaceChildren(...items);
 }
+$('setupLink').addEventListener('click', () => {
+  $('recCard').open = true;
+  const first = $(mode === 'bot' ? 'name' : 'newTitle');
+  first.focus();
+});
 
-function waveNote(values, peopleTalking) {
-  const note = $('waveNote');
-  const recent = values.slice(-60); // last 6 s
-  const peak = recent.length ? Math.max(...recent) : 0;
-  const elapsed = nowSec();
-  let text = 'Listening…';
-  let tone = '';
-  if (peak >= 4) {
-    text = 'Sound is coming through';
-    tone = 'ok';
-  } else if (elapsed > 15) {
-    text = peopleTalking ? 'People are talking but no sound is reaching the recording' : 'Quiet: no sound right now';
-    tone = peopleTalking ? 'warn' : '';
-  }
-  if (note.textContent !== text) note.textContent = text;
-  if ((note.dataset.tone || '') !== tone) note.dataset.tone = tone;
-}
-
-// ---------- who-spoke-when lanes ----------
-function drawLanes(canvas, lanes, segments, opt) {
-  const { start, end, live, laneH = 24, labels = true, now } = opt;
-  const gap = Math.round(laneH * 0.3);
-  const axisH = 20;
-  const H = lanes.length ? 2 + lanes.length * (laneH + gap) + axisH : 0;
-  const [c, W] = fitCanvas(canvas, H);
-  if (!lanes.length) return;
-  const labelW = labels ? Math.min(150, Math.max(92, W * 0.18)) : 0;
-  const x0 = labelW + 8;
-  const x1 = W - (live ? 4 : 2);
-  const span = Math.max(1, end - start);
-  const X = (t) => x0 + ((t - start) / span) * (x1 - x0);
-  const seam = css('--line');
-  const faint = css('--ink-3');
-  const text = css('--ink');
-  const track = css('--track');
-  const lanesBottom = 2 + lanes.length * (laneH + gap);
-  const font = getComputedStyle(document.body).fontFamily;
-
-  const steps = [5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
-  const step = steps.find((s) => span / s <= 8) || 3600;
-  c.font = `12px ${font}`;
-  c.textBaseline = 'top';
-  const ticks = [];
-  if (live) for (let k = 0; end - k * step >= start; k++) ticks.push(end - k * step);
-  else for (let t = Math.ceil(start / step) * step; t <= end; t += step) ticks.push(t);
-  for (const t of ticks) {
-    const x = X(t);
-    c.fillStyle = seam;
-    c.fillRect(Math.round(x), 0, 1, lanesBottom);
-    const label = live ? (end - t < 0.5 ? 'now' : '-' + mmss(end - t)) : mmss(t);
-    const w = c.measureText(label).width;
-    c.fillStyle = faint;
-    c.fillText(label, Math.min(Math.max(x - w / 2, x0), x1 - w), lanesBottom + 5);
-  }
-
-  lanes.forEach((lane, i) => {
-    const y = 2 + i * (laneH + gap);
-    c.fillStyle = track;
-    c.beginPath();
-    c.roundRect ? c.roundRect(x0, y, x1 - x0, laneH, 5) : c.rect(x0, y, x1 - x0, laneH);
-    c.fill();
-    if (labels) {
-      c.fillStyle = lane.color;
-      c.beginPath();
-      c.arc(5, y + laneH / 2, 4, 0, Math.PI * 2);
-      c.fill();
-      c.fillStyle = text;
-      c.font = (lane.speaking ? '600 ' : '') + `13px ${font}`;
-      c.textBaseline = 'middle';
-      c.fillText(ellipsize(c, lane.name, labelW - 16), 14, y + laneH / 2);
-      c.textBaseline = 'top';
-    }
-    c.fillStyle = lane.color;
-    for (const g of segments) {
-      if (g.key !== lane.key) continue;
-      const s = Math.max(g.start, start);
-      const e = Math.min(g.end, end);
-      if (e <= s) continue;
-      const xs = X(s);
-      const w = Math.max(2, X(e) - xs);
-      c.beginPath();
-      c.roundRect ? c.roundRect(xs, y + 3, w, laneH - 6, Math.min(4, w / 2)) : c.rect(xs, y + 3, w, laneH - 6);
-      c.fill();
-    }
-  });
-}
-function ellipsize(c, s, max) {
-  if (c.measureText(s).width <= max) return s;
-  while (s.length > 1 && c.measureText(s + '…').width > max) s = s.slice(0, -1);
-  return s + '…';
-}
-
-function liveLanes() {
-  if (!snap) return { lanes: [], segments: [] };
-  const people = snap.people || [];
-  const lanes = people.map((p) => ({ key: p.pid, name: p.name, color: colorOf('name:' + p.name), speaking: p.speaking }));
-  const t = nowSec();
-  const segments = (snap.segments || []).map((g) => {
-    const speaking = people.find((p) => p.pid === g.pid)?.speaking;
-    const open = speaking && g.end >= snap.elapsedMs / 1000 - 0.4;
-    return { key: g.pid, start: g.start, end: open ? Math.max(g.end, t) : g.end, open };
-  });
-  return { lanes, segments };
-}
-
-// ---------- render ----------
+// ---------- the live view ----------
 function render() {
   const s = snap;
   const meetingLive = !!(s && s.active);
-  const localLive = !!local;
-  const showLive = meetingLive || localLive;
-  const meetingDone = !!(s && !s.active && s.id !== dismissedId);
-  const showDone = !showLive && (!!localDone || meetingDone);
+  const live = !!local || meetingLive;
   let status = 'idle';
-  if (localLive) status = local.stopping ? 'processing' : local.pausedAt ? 'paused' : 'recording';
+  if (local) status = local.stopping ? 'processing' : local.pausedAt ? 'paused' : 'recording';
   else if (meetingLive) status = s.status;
-  else if (localDone) status = localDone.status;
-  else if (meetingDone) status = s.status;
   document.body.dataset.status = status;
+  $('livePill').hidden = !live;
 
-  // top strip: always says whether anything is recording, and for how long
-  let top = TOP[status] || status;
-  if (localLive && !local.stopping) top = local.pausedAt ? 'Paused' : local.call ? 'Recording you and the call' : 'Recording from the microphone';
-  else if (meetingLive && status === 'recording') top = 'In a meeting, recording';
-  if ($('pill').textContent !== top) $('pill').textContent = top;
-  if (!showLive && $('topClock').textContent !== '00:00:00') $('topClock').textContent = '00:00:00';
-
-  $('launch').hidden = showLive || showDone;
-  $('live').hidden = !showLive;
-  $('done').hidden = !showDone;
-  $('live').dataset.kind = localLive ? 'local' : 'meeting';
+  // the home page and the live page swap by themselves
+  const w = where();
+  if (w.family === 'record' && w.page !== 'rec' && $(live ? 'viewLive' : 'viewHome').hidden) route();
 
   if (s && s.status !== lastStatus) {
-    if (['done', 'error', 'cancelled'].includes(s.status) && lastStatus) loadRecordings();
+    const was = lastStatus;
     lastStatus = s.status;
+    if (was && !s.active) meetingEnded(s);
   }
+  if (!live) return;
 
-  if (localLive) {
-    $('statusTitle').textContent = local.stopping ? 'Saving the recording' : local.pausedAt ? 'Paused' : 'Recording from this computer';
-    $('statusSub').textContent = local.stopping
+  const title = $('newTitle').value.trim();
+  const state = local ? (local.stopping ? 'Saving' : local.pausedAt ? 'Paused' : 'Recording') : (STATUS[s.status] || [s.status])[0];
+  $('pillTitle').textContent = title || (local ? 'Recording' : 'Google Meet');
+  $('pillState').textContent = state;
+  $('livePill').classList.toggle('paused', !!(local && local.pausedAt));
+  $('liveHeading').textContent = title || (local ? 'Recording on this computer' : 'Recording a Google Meet');
+  $('liveLabel').textContent = state;
+  $('botCard').hidden = !!local;
+  const cap = $('captureBtn');
+  cap.classList.toggle('is-paused', !!(local && local.pausedAt));
+
+  if (local) {
+    $('captureLabel').textContent = local.stopping ? 'Saving…' : local.pausedAt ? 'Tap to continue' : 'Tap to pause';
+    cap.disabled = !!local.stopping;
+    cap.setAttribute('aria-label', local.pausedAt ? 'Continue recording' : 'Pause recording');
+    $('liveSub').textContent = local.stopping
       ? 'Then the transcript starts by itself'
       : local.pausedAt
-        ? 'Nothing is being recorded. Press Resume to carry on in the same recording.'
-      : local.call === 'ended'
-        ? "Sound sharing was stopped, so only your microphone is recording now"
-        : local.call
-          ? 'Your microphone and the sound of your call'
-          : "This computer's microphone";
+        ? 'Nothing is being recorded. Tap the button to carry on in the same recording.'
+        : local.call === 'ended'
+          ? 'Sound sharing was stopped, so only your microphone is recording now'
+          : '';
     $('stopBtn').disabled = !!local.stopping;
-    $('stopBtn').textContent = local.stopping ? 'Saving…' : 'Stop & transcribe';
-    $('pauseBtn').hidden = false;
-    $('pauseBtn').disabled = !!local.stopping;
-    $('pauseBtn').textContent = local.pausedAt ? 'Resume' : 'Pause';
+    $('stopText').textContent = local.stopping ? 'Saving…' : 'End';
+    $('captureStatus').replaceChildren(
+      el('span', {}, icon('mic'), local.device),
+      el('span', { class: local.call === true ? 'on' : '' }, icon('audio'), local.call === true ? 'Call sound on' : 'Microphone only'),
+      $('people').value ? el('span', {}, icon('people'), $('people').value === '1' ? 'Just you' : `${$('people').value} people`) : null
+    );
     return;
   }
 
-  $('pauseBtn').hidden = true; // pausing is for Record; the bot's speaker log would drift out of line with the sound
-  if (meetingLive) {
-    const [title, sub] = STATUS[s.status] || [s.status, ''];
-    $('statusTitle').textContent = title;
-    $('statusSub').textContent = sub || s.url.replace(/^https?:\/\//, '');
-    const stop = $('stopBtn');
-    stop.disabled = s.status === 'stopping' || s.status === 'processing' || !!s.stopReason;
-    stop.textContent = s.status === 'recording' ? 'Stop & save' : ['joining', 'waiting', 'starting'].includes(s.status) ? 'Cancel' : 'Stopping…';
-    if (s.elapsedMs !== lastElapsed) {
-      lastElapsed = s.elapsedMs;
-      lastElapsedAt = performance.now();
-    }
-    renderPeople(s);
-    renderStats(s);
-    renderLog(s);
-    if (s.previewAt && s.previewAt !== lastPreviewAt) {
-      lastPreviewAt = s.previewAt;
-      const img = $('preview');
-      img.onload = () => {
-        img.hidden = false;
-        $('previewEmpty').hidden = true;
-      };
-      img.src = '/api/preview.jpg?t=' + s.previewAt;
-    }
-    return;
+  const [, sub] = STATUS[s.status] || [s.status, ''];
+  // the bot's recording cannot pause: its speaker log would drift out of line with the sound
+  $('captureLabel').textContent = s.status === 'recording' ? 'The bot is recording' : state;
+  cap.disabled = true;
+  cap.removeAttribute('aria-label');
+  $('liveSub').textContent = sub;
+  const stop = $('stopBtn');
+  stop.disabled = s.status === 'stopping' || s.status === 'processing' || !!s.stopReason;
+  $('stopText').textContent = s.status === 'recording' ? 'End' : ['joining', 'waiting', 'starting'].includes(s.status) ? 'Cancel' : 'Stopping…';
+  if (s.elapsedMs !== lastElapsed) {
+    lastElapsed = s.elapsedMs;
+    lastElapsedAt = performance.now();
   }
-
-  if (showDone && localDone) {
-    $('doneTitle').textContent = localDone.status === 'error' ? "Couldn't save the recording" : 'Saved';
-    $('doneSub').textContent = localDone.text;
-    $('doneNotes').replaceChildren();
-  } else if (showDone) {
-    const [title] = STATUS[s.status] || [s.status];
-    $('doneTitle').textContent = title;
-    const inCall = (s.people || []).length;
-    const spoke = (s.people || []).filter((p) => p.turns > 0).length;
-    const who = spoke === inCall ? plural(inCall, 'person', 'people') : `${plural(inCall, 'person', 'people')} in the call (${spoke} spoke)`;
-    const next = whisper && whisper.available ? 'The transcript is being written now; its progress shows at the top of the list below.' : "It's at the top of the list below.";
-    $('doneSub').textContent =
-      s.status === 'done'
-        ? `${length(s.elapsedMs / 1000)} recorded with ${who} and ${plural(s.totalSegments, 'speaking turn')}. ${next}`
-        : s.error || (s.stopReason ? `Stopped: ${s.stopReason}` : '');
-    $('doneNotes').replaceChildren(...(s.notes || []).map((n) => el('p', {}, n)));
+  $('captureStatus').replaceChildren(
+    el('span', {}, icon('link'), s.url.replace(/^https?:\/\//, '')),
+    el('span', { class: 'on' }, icon('screen'), $('talk').checked ? 'You talk in its window' : $('show').checked ? 'Window shown' : 'Out of sight')
+  );
+  renderPeople(s);
+  renderStats(s);
+  renderLog(s);
+  if (s.previewAt && s.previewAt !== lastPreviewAt) {
+    lastPreviewAt = s.previewAt;
+    const img = $('preview');
+    img.onload = () => {
+      img.hidden = false;
+      $('previewEmpty').hidden = true;
+    };
+    img.src = '/api/preview.jpg?t=' + s.previewAt;
   }
 }
 
+function meetingEnded(s) {
+  loadRecordings().then(() => {
+    const w = where();
+    if (s.status === 'done') {
+      $('newTitle').value = '';
+      if (w.family === 'record' && w.page !== 'rec') location.hash = '#rec/' + encodeURIComponent(s.id);
+    } else {
+      showNotice(STATUS[s.status] ? STATUS[s.status][0] : s.status, [s.error || (s.stopReason ? `Stopped: ${s.stopReason}` : ''), ...(s.notes || [])].filter(Boolean).join(' '));
+      route();
+    }
+  });
+}
+function showNotice(title, text) {
+  $('noticeTitle').textContent = title;
+  $('noticeText').textContent = text;
+  $('notice').hidden = false;
+}
+$('noticeClose').addEventListener('click', () => ($('notice').hidden = true));
+
+const colorFor = (list, name) => Math.max(0, list.indexOf(name)) % WAVE.length;
 function renderPeople(s) {
   const people = [...(s.people || [])];
   const talking = people.filter((p) => p.speaking).length;
-  $('peopleMeta').textContent = people.length ? `${plural(people.length, 'person', 'people')}${talking ? ` · ${talking} talking now` : ''}` : '';
-  const list = $('people');
+  $('peopleMeta').textContent = people.length ? `${plural(people.length, 'person', 'people')}${talking ? ` · ${talking} talking` : ''}` : '';
+  const names = people.map((p) => p.name);
   if (!people.length) {
-    list.replaceChildren(el('li', { class: 'empty' }, s.status === 'recording' ? 'Nobody has been seen yet.' : 'People show up here once the bot is in the meeting.'));
+    $('peopleLive').replaceChildren(el('li', { class: 'muted' }, s.status === 'recording' ? 'Nobody has been seen yet.' : 'People show up here once the bot is in the meeting.'));
     return;
   }
-  list.replaceChildren(
-    ...people.map((p, i) =>
-      el(
-        'li',
-        { class: 'person' + (p.speaking ? ' speaking' : '') + (s.status === 'recording' && p.visible === false ? ' offscreen' : ''), style: `--c:${colorOf('name:' + p.name)}` },
-        el('span', { class: 'key-top', 'aria-hidden': 'true' }, el('span', { class: 'led' }), el('span', { class: 'ch' }, pad(i + 1))),
+  $('peopleLive').replaceChildren(
+    ...people.map((p) =>
+      el('li', { class: 'person' + (p.speaking ? ' speaking' : ''), style: `--c:${INK[colorFor(names, p.name)]}` },
+        el('span', { class: 'dot', 'aria-hidden': 'true' }),
         el('span', { class: 'person-name', title: p.name }, p.name),
-        el('span', { class: 'person-num' }, el('b', {}, mmss(p.talkMs / 1000)), ` · ${plural(p.turns, 'turn')}`, p.speaking ? el('span', { class: 'sr-only' }, ', talking now') : null)
+        el('span', { class: 'person-num' }, `${mmss(p.talkMs / 1000)} · ${plural(p.turns, 'turn')}`, p.speaking ? el('span', { class: 'sr-only' }, ', talking now') : null)
       )
     )
   );
 }
-
 function renderStats(s) {
-  const v = bytes(s.stats.videoBytes);
-  const a = bytes(s.stats.audioBytes);
-  const stat = (label, value, unit, cls = '') => el('div', { class: 'stat ' + cls }, el('dt', {}, label), el('dd', {}, value, unit ? el('small', {}, ' ' + unit) : null));
-  const folder = el('a', { href: '#', onclick: (e) => { e.preventDefault(); api('/api/open/' + s.id).catch(() => {}); } }, s.outDir);
-  $('stats').replaceChildren(
-    stat('Video written', v[0], v[1]),
-    stat('Audio written', a[0], a[1]),
-    stat('Speaking turns', String(s.totalSegments)),
-    stat('People on screen', String(s.stats.visible)),
-    el('div', { class: 'stat wide' }, el('dt', {}, 'Saving to'), el('dd', {}, folder))
-  );
+  const v = bytes(s.stats.audioBytes);
+  const stat = (label, value) => el('div', {}, el('dt', {}, label), el('dd', {}, value));
+  $('stats').replaceChildren(stat('Sound written', `${v[0]} ${v[1]}`), stat('Speaking turns', String(s.totalSegments)), stat('People on screen', String(s.stats.visible)));
 }
-
 function renderLog(s) {
   const log = $('log');
   const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
   log.replaceChildren(...(s.logs || []).map((l) => el('li', {}, el('time', {}, new Date(l.t).toLocaleTimeString([], { hour12: false })), el('span', {}, l.msg))));
   if (nearBottom) log.scrollTop = log.scrollHeight;
 }
+for (const b of document.querySelectorAll('.live-tabs [data-live]')) {
+  b.addEventListener('click', () => {
+    for (const x of document.querySelectorAll('.live-tabs [data-live]')) x.setAttribute('aria-selected', String(x === b));
+    for (const p of document.querySelectorAll('.live-pane')) p.hidden = p.dataset.live !== b.dataset.live;
+  });
+}
+
+// who spoke when, the last two minutes (the bot)
+function drawLanes(canvas, lanes, segments, { start, end }) {
+  const laneH = 18;
+  const gap = 8;
+  const H = lanes.length ? lanes.length * (laneH + gap) + 18 : 0;
+  const [c, W] = fitCanvas(canvas, H);
+  if (!lanes.length) return;
+  const labelW = Math.min(140, Math.max(80, W * 0.2));
+  const x0 = labelW + 8;
+  const x1 = W - 2;
+  const X = (t) => x0 + ((t - start) / Math.max(1, end - start)) * (x1 - x0);
+  const font = getComputedStyle(document.body).fontFamily;
+  lanes.forEach((lane, i) => {
+    const y = i * (laneH + gap);
+    c.fillStyle = '#0d2430';
+    c.fillRect(x0, y, x1 - x0, laneH);
+    c.fillStyle = '#edf3f2';
+    c.font = (lane.speaking ? '600 ' : '') + `12px ${font}`;
+    c.textBaseline = 'middle';
+    c.fillText(lane.name.length > 18 ? lane.name.slice(0, 17) + '…' : lane.name, 0, y + laneH / 2);
+    c.fillStyle = lane.color;
+    for (const g of segments) {
+      if (g.key !== lane.key) continue;
+      const s = Math.max(g.start, start);
+      const e = Math.min(g.end, end);
+      if (e > s) c.fillRect(X(s), y + 3, Math.max(2, X(e) - X(s)), laneH - 6);
+    }
+  });
+  c.fillStyle = '#9db4bd';
+  c.textBaseline = 'top';
+  c.font = `11px ${font}`;
+  c.fillText('2 min ago', x0, H - 13);
+  const nowW = c.measureText('now').width;
+  c.fillText('now', x1 - nowW, H - 13);
+}
+
+// the sound, drawn as bars inside the main button
+const BARS = 24;
+function drawCapture(levels) {
+  const box = $('captureWave');
+  if (box.children.length !== BARS) box.replaceChildren(...Array.from({ length: BARS }, () => el('i')));
+  const recent = levels.slice(-BARS);
+  [...box.children].forEach((b, i) => {
+    const v = recent[i - (BARS - recent.length)] || 0;
+    const db = v > 0 ? 20 * Math.log10(v / 1000) : -120;
+    const mag = Math.max(0.05, Math.min(1, (db + 54) / 48));
+    b.style.transform = `scaleY(${((3 + mag * 58) / 61).toFixed(3)})`;
+  });
+  const last = recent[recent.length - 1] || 0;
+  const db = last > 0 ? 20 * Math.log10(last / 1000) : -120;
+  $('meterBar').style.transform = `scaleX(${Math.max(0, Math.min(1, (db + 54) / 48)).toFixed(3)})`;
+}
+function waveNote(values, peopleTalking) {
+  const recent = values.slice(-60); // last 6 s
+  const peak = recent.length ? Math.max(...recent) : 0;
+  let text = 'Listening…';
+  let tone = '';
+  if (local && local.pausedAt) text = 'Paused';
+  else if (peak >= 4) (text = 'Sound is coming through'), (tone = 'ok');
+  else if (nowSec() > 15) {
+    text = peopleTalking ? 'People are talking but no sound is reaching the recording' : 'Quiet: no sound right now';
+    tone = peopleTalking ? 'warn' : '';
+  }
+  const note = $('waveNote');
+  if (note.textContent !== text) note.textContent = text;
+  if ((note.dataset.tone || '') !== tone) note.dataset.tone = tone;
+}
 
 function frame() {
-  const t = nowSec();
-  if (local) {
-    const c = clock(t);
-    $('clock').textContent = c;
-    $('topClock').textContent = c;
-    drawWave($('wave'), local.levels, local.levelsEnd, t);
-    waveNote(local.levels, false);
-  } else if (snap && snap.active) {
-    const c = clock(t);
-    $('clock').textContent = c;
-    $('topClock').textContent = c;
-    const levels = snap.levels || [];
-    if (snap.status === 'recording' || levels.length) {
-      // levels arrive in batches about once a second: keep scrolling smoothly between batches
-      const end = lastElapsed / 1000;
-      const drift = Math.min(1.2, (performance.now() - lastElapsedAt) / 1000);
-      drawWave($('wave'), levels, end, end + drift);
-      waveNote(levels, (snap.people || []).some((p) => p.speaking));
+  if (isLive()) {
+    const t = mmss(nowSec());
+    if ($('clock').textContent !== t) $('clock').textContent = t;
+    if ($('pillTime').textContent !== t) $('pillTime').textContent = t;
+    if (local) {
+      if (!local.pausedAt) drawCapture(local.levels);
+      waveNote(local.levels, false);
+    } else {
+      drawCapture(snap.levels || []);
+      waveNote(snap.levels || [], (snap.people || []).some((p) => p.speaking));
+      if (!$('botCard').hidden && !$('lanes').closest('[hidden]')) {
+        const people = snap.people || [];
+        const names = people.map((p) => p.name);
+        const lanes = people.map((p) => ({ key: p.pid, name: p.name, color: INK[colorFor(names, p.name)], speaking: p.speaking }));
+        const now = nowSec();
+        const segments = (snap.segments || []).map((g) => {
+          const speaking = people.find((p) => p.pid === g.pid)?.speaking;
+          const open = speaking && g.end >= snap.elapsedMs / 1000 - 0.4;
+          return { key: g.pid, start: g.start, end: open ? Math.max(g.end, now) : g.end };
+        });
+        drawLanes($('lanes'), lanes, segments, { start: now - 120, end: now });
+        $('lanesEmpty').hidden = lanes.length > 0;
+      }
     }
-    const { lanes, segments } = liveLanes();
-    drawLanes($('lanes'), lanes, segments, { start: t - 120, end: t, now: t, live: true });
-    $('lanesEmpty').hidden = lanes.length > 0;
   }
   requestAnimationFrame(frame);
 }
 
-// ---------- record here (microphone, no meeting) ----------
+// ---------- recording on this computer ----------
+function callHelp(failed) {
+  const how = MAC ? 'choose the tab your meeting is in and keep "Also share tab audio" on' : 'choose "Entire screen" and switch on "Also share system audio"';
+  return failed ? `The call's sound wasn't shared, so recording didn't start. Press the microphone again, then ${how}.` : `When the browser asks what to share, ${how}.`;
+}
 async function startLocal() {
-  const err = $('localError');
+  const err = $('startError');
   err.textContent = '';
-  if (snap && snap.active) {
-    err.textContent = 'The bot is in a meeting right now. Stop it first.';
-    return;
-  }
-  const btn = $('localBtn');
+  if (snap && snap.active) return void (err.textContent = 'The bot is in a meeting right now. End it first.');
+  const btn = $('bigBtn');
   btn.disabled = true;
   // the other people's voices only come out of the speakers, and the microphone's echo cancelling removes
   // them on purpose, so the call is taken from the computer's own sound instead
   let shared = null;
   if ($('localCall').checked) {
     try {
-      shared = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-        systemAudio: 'include',
-        selfBrowserSurface: 'exclude',
-        surfaceSwitching: 'exclude',
-      });
+      shared = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }, systemAudio: 'include', selfBrowserSurface: 'exclude', surfaceSwitching: 'exclude' });
     } catch (e) {
       btn.disabled = false;
-      err.textContent =
-        e && e.name === 'NotAllowedError'
-          ? "Nothing was shared, so recording didn't start. Press Record again and choose what to share, or untick \"Also record the people in my call\" to record only your microphone."
-          : 'This browser could not share the computer\'s sound: ' + (e && e.message);
+      err.textContent = e && e.name === 'NotAllowedError'
+        ? 'Nothing was shared, so recording didn\'t start. Press the microphone again and choose what to share, or turn "Call sound" off on the left to record only your microphone.'
+        : "This browser could not share the computer's sound: " + (e && e.message);
       return;
     }
     if (!shared.getAudioTracks().length) {
@@ -477,18 +490,15 @@ async function startLocal() {
   } catch (e) {
     if (shared) shared.getTracks().forEach((t) => t.stop());
     btn.disabled = false;
-    err.textContent =
-      e && e.name === 'NotAllowedError'
-        ? 'The browser was not allowed to use the microphone. Click the lock icon next to the address, allow the microphone, then try again.'
-        : e && e.name === 'NotFoundError'
-          ? 'No microphone was found on this computer.'
-          : 'Could not open the microphone: ' + (e && e.message);
+    err.textContent = e && e.name === 'NotAllowedError'
+      ? 'The browser was not allowed to use the microphone. Click the lock icon next to the address, allow the microphone, then try again.'
+      : e && e.name === 'NotFoundError' ? 'No microphone was found on this computer.' : 'Could not open the microphone: ' + (e && e.message);
     return;
   }
   const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', ''].find((m) => !m || (window.MediaRecorder && MediaRecorder.isTypeSupported(m)));
   let id;
   try {
-    ({ id } = await api('/api/local/start', { mime, source: shared ? 'microphone+computer' : 'microphone', people: Number($('localPeople').value) || null }));
+    ({ id } = await api('/api/local/start', { mime, title: $('newTitle').value, source: shared ? 'microphone+computer' : 'microphone', people: Number($('people').value) || null }));
   } catch (e) {
     stream.getTracks().forEach((t) => t.stop());
     if (shared) shared.getTracks().forEach((t) => t.stop());
@@ -519,7 +529,7 @@ async function startLocal() {
   if (!shared) ctx.createMediaStreamSource(stream).connect(analyser);
   const buf = new Float32Array(analyser.fftSize);
   const rec = new MediaRecorder(mix.stream, mime ? { mimeType: mime } : undefined);
-  local = { id, stream, shared, call: !!shared, ctx, rec, t0: performance.now(), levels: [], levelsEnd: 0, uploads: Promise.resolve(), failed: null, device: stream.getAudioTracks()[0]?.label || 'Microphone' };
+  local = { id, stream, shared, call: !!shared, ctx, rec, t0: performance.now(), levels: [], uploads: Promise.resolve(), failed: null, device: stream.getAudioTracks()[0]?.label || 'Microphone' };
   if (shared) {
     const me = local;
     // "Stop sharing" in the browser's bar: keep recording the microphone and say so
@@ -531,10 +541,9 @@ async function startLocal() {
     analyser.getFloatTimeDomainData(buf);
     let sum = 0;
     for (const x of buf) sum += x * x;
-    if (local.pausedAt) return; // the sound strip stands still while paused
+    if (local.pausedAt) return; // the sound stands still while paused
     local.levels.push(Math.min(1000, Math.round(Math.sqrt(sum / buf.length) * 1000)));
     if (local.levels.length > 600) local.levels.shift();
-    local.levelsEnd = localElapsedMs(local) / 1000;
   }, 100);
   rec.ondataavailable = (e) => {
     if (!e.data || !e.data.size) return;
@@ -547,7 +556,23 @@ async function startLocal() {
   };
   rec.start(2000);
   btn.disabled = false;
-  localDone = null;
+  $('notice').hidden = true;
+  if (where().family !== 'record' || where().page === 'rec') location.hash = '#record';
+  render();
+  route();
+}
+
+function togglePause() {
+  const me = local;
+  if (!me || me.stopping) return;
+  if (me.pausedAt) {
+    me.rec.resume();
+    me.pausedMs = (me.pausedMs || 0) + (performance.now() - me.pausedAt);
+    me.pausedAt = null;
+  } else {
+    me.rec.pause();
+    me.pausedAt = performance.now();
+  }
   render();
 }
 
@@ -568,395 +593,56 @@ async function stopLocal() {
   await me.uploads;
   try {
     const r = await api(`/api/local/${me.id}/finish`, { durationMs });
-    const txErr = r.transcribe && r.transcribe.error;
-    localDone = {
-      status: 'done',
-      text: `${length(r.durationSec)} recorded ${me.call ? 'from your microphone and the call' : 'from the microphone'}. ` + (txErr ? `It's saved, but the transcript couldn't start: ${txErr}` : 'The transcript is being written now; watch its progress in the list below.'),
-    };
     local = null;
+    $('newTitle').value = '';
     await loadRecordings();
-    if (r.transcribe && !txErr) showTx(r.transcribe, true);
+    if (r.transcribe && r.transcribe.error) toast("It's saved, but the transcript couldn't start: " + r.transcribe.error);
+    else if (r.transcribe) showTx(r.transcribe, true);
+    render();
+    location.hash = '#rec/' + encodeURIComponent(r.id);
   } catch (e) {
-    localDone = { status: 'error', text: e.message + (me.failed ? ` (${me.failed.message})` : '') };
     local = null;
+    render();
+    route();
+    showNotice("Couldn't save the recording", e.message + (me.failed ? ` (${me.failed.message})` : ''));
     loadRecordings();
   }
-  render();
 }
 
-// ---------- recordings ----------
-const PRIMARY = ['video.mp4', 'audio.wav', 'transcript.txt', 'transcript.srt', 'speakers.csv', 'speakers.srt'];
-
-async function loadRecordings() {
-  const list = await fetch('/api/recordings').then((r) => r.json()).catch(() => []);
-  $('recList').replaceChildren(...list.map(renderRecording));
-  $('recEmpty').hidden = list.length > 0;
-}
-
-function renderRecording(r) {
-  const node = $('recItem').content.firstElementChild.cloneNode(true);
-  const isLocal = r.kind === 'local';
-  node.dataset.kind = isLocal ? 'local' : 'meeting';
-  node.dataset.id = r.id;
-  const when = r.startedAt ? new Date(r.startedAt) : null;
-  node.querySelector('.rec-kind').textContent = isLocal ? 'Microphone recording' : 'Google Meet';
-  node.querySelector('.rec-when').textContent = when ? when.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : r.id;
-  node.querySelector('.rec-facts').textContent = isLocal && !r.speakers.length
-    ? length(r.durationSec)
-    : [length(r.durationSec), plural(r.speakers.length, 'speaker'), plural(r.segments, 'speaking turn')].join(' · ');
-  // voices told apart from a Record recording can be named once; the whole transcript follows
-  const renamable = isLocal && r.speakers.length;
-  node.querySelector('.rec-speakers').replaceChildren(
-    ...r.speakers.map((n) =>
-      renamable
-        ? el('button', { class: 'chip chip-rename', type: 'button', title: `Name ${n}`, style: `--c:${colorOf('name:' + n)}`, onclick: () => renameSpeaker(r.id, n) }, n)
-        : el('span', { class: 'chip', style: `--c:${colorOf('name:' + n)}` }, n)
-    ),
-    ...(renamable ? [el('span', { class: 'hint chip-hint' }, 'Click a name to change it')] : [])
-  );
-
-  const files = [...r.files].sort((a, b) => (PRIMARY.indexOf(a.name) + 1 || 99) - (PRIMARY.indexOf(b.name) + 1 || 99));
-  node.querySelector('.rec-files').replaceChildren(
-    ...files.map((f) => {
-      const [n, u] = bytes(f.bytes);
-      return el('span', {}, el('a', { href: `/rec/${r.id}/${f.name}?download`, download: f.name }, f.name), ` ${n} ${u}`);
-    })
-  );
-
-  const hasVideo = r.files.some((f) => f.name === 'video.mp4');
-  const watch = node.querySelector('.act-watch');
-  watch.hidden = !hasVideo;
-  watch.addEventListener('click', () => {
-    const box = node.querySelector('.rec-player');
-    if (!box.hidden) {
-      box.hidden = true;
-      box.replaceChildren();
-      watch.textContent = 'Watch with names';
-      return;
-    }
-    const v = el('video', { controls: '', preload: 'metadata', src: `/rec/${r.id}/video.mp4` });
-    v.append(el('track', { kind: 'captions', label: 'Speakers', srclang: 'en', src: `/rec/${r.id}/speakers.vtt`, default: '' }));
-    box.replaceChildren(v);
-    box.hidden = false;
-    watch.textContent = 'Hide video';
-  });
-  node.querySelector('.act-open').addEventListener('click', () => api('/api/open/' + r.id).catch((e) => alert(e.message)));
-  nameFolderButtons(node);
-  node.querySelector('.act-delete').addEventListener('click', async () => {
-    const when = node.querySelector('.rec-when').textContent;
-    const sure = await confirmBox({ title: 'Delete this recording?', text: `The recording from ${when}, its audio, video and transcript are removed from this computer. This cannot be undone.`, ok: 'Delete' });
-    if (!sure) return;
-    try {
-      await api('/api/rec-delete/' + r.id);
-      node.remove();
-      if (!document.querySelector('.rec-item')) $('recEmpty').hidden = false;
-    } catch (e) {
-      alert(e.message);
-    }
-  });
-  if (isLocal) node.querySelector('.act-merge').hidden = true; // merging needs a speaker timeline
-
-  // Transcribe with the local Whisper model
-  const hasAudio = r.files.some((f) => f.name === 'audio.wav');
-  const hasTranscript = r.files.some((f) => f.name === 'transcript.txt');
-  const txBtn = node.querySelector('.act-transcribe');
-  txBtn.textContent = hasTranscript ? 'Transcribe again' : 'Transcribe';
-  // one primary button per card: once there is a transcript, Copy is the main action
-  txBtn.classList.toggle('key-primary', !hasTranscript);
-  txBtn.classList.toggle('key-quiet', hasTranscript);
-  txBtn.classList.toggle('key-quiet', hasTranscript);
-  txBtn.classList.toggle('key-primary', !hasTranscript);
-  txBtn.hidden = !hasAudio;
-  txBtn.addEventListener('click', async () => {
-    const err = node.querySelector('.tx-error');
-    err.hidden = true;
-    txBtn.disabled = true;
-    try {
-      showTx(await api('/api/transcribe/' + r.id, { model: $('whisperModel').value || undefined }), true);
-    } catch (e) {
-      err.textContent = e.message;
-      err.hidden = false;
-      txBtn.disabled = false;
-    }
-  });
-  node.querySelector('.tx-cancel').addEventListener('click', () => api('/api/transcribe-cancel').catch(() => {}));
-  if (hasTranscript) loadTranscript(node, r.id, isLocal && !r.speakers.length);
-  syncTxButtons(node);
-
-  const fileInput = node.querySelector('.act-merge input');
-  fileInput.addEventListener('change', async () => {
-    const f = fileInput.files[0];
-    if (!f) return;
-    const err = node.querySelector('.tx-error');
-    err.hidden = true;
-    try {
-      await api('/api/merge/' + r.id, { filename: f.name, content: await f.text() });
-      await refreshRecording(r.id);
-    } catch (e) {
-      err.textContent = 'Could not use that file: ' + e.message;
-      err.hidden = false;
-    }
-    fileInput.value = '';
-  });
-
-  // whole-meeting overview
-  const canvas = node.querySelector('.rec-overview');
-  if (r.segments) {
-    fetch(`/rec/${r.id}/speakers.json`)
-      .then((x) => x.json())
-      .then(({ segments }) => {
-        const names = [...new Set(segments.map((g) => g.speaker))];
-        const lanes = names.map((n) => ({ key: n, name: n, color: colorOf('name:' + n) }));
-        const segs = segments.map((g) => ({ key: g.speaker, start: g.start, end: g.end }));
-        const draw = () => drawLanes(canvas, lanes, segs, { start: 0, end: Math.max(r.durationSec, 1), laneH: 12, labels: true });
-        requestAnimationFrame(draw);
-        new ResizeObserver(draw).observe(canvas.parentElement);
-      })
-      .catch(() => {});
-  }
-  return node;
-}
-
-// ---------- transcription ----------
-let whisper = null;
-let tx = null; // latest transcription snapshot from the server
-const recNode = (id) => document.querySelector(`.rec-item[data-id="${CSS.escape(id)}"]`);
-
-async function loadWhisper() {
-  const box = $('whisperInfo');
-  try {
-    whisper = await fetch('/api/whisper').then((r) => r.json());
-  } catch {
-    whisper = { available: false, reason: 'Could not check for the transcriber.' };
-  }
-  box.dataset.state = whisper.available ? 'ready' : 'missing';
-  const where = whisper.device && whisper.device !== 'cpu' ? whisper.gpu || 'the graphics card' : 'the processor';
-  const sel = $('whisperModel');
-  if (whisper.available) {
-    $('whisperText').textContent = whisper.models.length > 1 ? `Transcriber ready on ${where}, model` : `Transcriber ready (Whisper ${whisper.models[0].name}, ${where})`;
-    sel.replaceChildren(...whisper.models.map((m) => el('option', { value: m.name }, m.name)));
-    sel.hidden = whisper.models.length < 2;
-  } else {
-    $('whisperText').textContent = whisper.engine
-      ? 'The transcriber needs its model once.'
-      : 'The transcriber is not installed yet. Open the app with "Start Meet Recorder" to set it up.';
-    sel.hidden = true;
-  }
-  // first run on a new computer: one button downloads the model
-  let get = $('whisperGet');
-  if (!get) {
-    get = el('button', { id: 'whisperGet', class: 'key key-primary key-sm', type: 'button', hidden: '' });
-    get.addEventListener('click', async () => {
-      get.disabled = true;
-      try {
-        showWhisperSetup(await api('/api/whisper/setup'));
-      } catch (e) {
-        $('whisperText').textContent = e.message;
-        get.disabled = false;
-      }
-    });
-    box.append(get);
-  }
-  const big = whisper.device === 'cuda';
-  get.textContent = `Get it (${big ? '3.1' : '1.6'} GB)`;
-  get.hidden = !(whisper.engine && !whisper.available);
-  document.querySelectorAll('.rec-item').forEach(syncTxButtons);
-}
-
-function showWhisperSetup(s) {
-  if (!s) return;
-  const get = $('whisperGet');
-  if (s.status === 'running') {
-    if (get) get.hidden = true;
-    const gb = (n) => (n / 1e9).toFixed(1);
-    $('whisperText').textContent = `Downloading Whisper ${s.name}: ${gb(s.got)} of ${gb(s.total)} GB (${Math.floor(s.percent)}%)`;
-  } else if (s.status === 'done' && !(whisper && whisper.available)) {
-    loadWhisper();
-  } else if (s.status === 'error') {
-    $('whisperText').textContent = 'The download stopped: ' + s.error;
-    if (get) { get.hidden = false; get.disabled = false; }
-  }
-}
-
-function syncTxButtons(node) {
-  const b = node.querySelector('.act-transcribe');
-  const busy = tx && ['loading', 'separating', 'running', 'merging'].includes(tx.status);
-  b.disabled = !!busy || (whisper && !whisper.available);
-  b.title = whisper && !whisper.available ? whisper.reason || '' : busy && tx.id !== node.dataset.id ? 'Another recording is being transcribed' : '';
-}
-
-const LINE = /^\[(\d\d:\d\d:\d\d) - (\d\d:\d\d:\d\d)\] (.*)$/;
-// names can contain brackets themselves: "Sara (2) (over: Ali (3)): text"
-const WHO = /^(.+?)(?: \(over: (.*?)\))?: (.*)$/;
-async function renameSpeaker(id, from) {
-  const to = prompt(`Who is ${from}?`, /^Speaker \d+$/.test(from) ? '' : from);
-  if (!to || !to.trim() || to.trim() === from) return;
-  try {
-    await api('/api/rename/' + id, { from, to: to.trim() });
-    refreshRecording(id);
-  } catch (e) {
-    alert(e.message);
-  }
-}
-
-async function loadTranscript(node, id, isLocal) {
-  const box = node.querySelector('.rec-transcript');
-  const text = await fetch(`/rec/${id}/transcript.txt`, { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).catch(() => '');
-  if (!text.trim()) {
-    box.querySelector('.tx-meta').textContent = 'No speech was found in this recording.';
-    box.querySelector('.tx-copy').hidden = true;
-    box.querySelector('.tx-copy-raw').hidden = true;
-    box.querySelector('.tx-lines').replaceChildren();
-    box.hidden = false;
+async function join() {
+  const err = $('startError');
+  err.textContent = '';
+  if (local) return void (err.textContent = 'A recording is running on this computer. End it first.');
+  if (!$('url').value.trim()) {
+    err.textContent = 'Paste the Google Meet link first.';
+    $('url').focus();
     return;
   }
-  const lines = text.trim().split('\n');
-  const speakers = new Set();
-  const items = lines.map((raw) => {
-    const m = LINE.exec(raw);
-    if (!m) return el('li', { class: 'tx-line' }, el('time', {}, ''), el('div', { class: 'tx-say' }, el('div', { class: 'tx-text', dir: 'auto' }, raw)));
-    const time = m[1].replace(/^00:/, '');
-    const w = isLocal ? null : WHO.exec(m[3]);
-    const say = el('div', { class: 'tx-say' });
-    if (w) {
-      speakers.add(w[1]);
-      say.append(el('span', { class: 'tx-who', style: `--c:${colorOf('name:' + w[1])}` }, el('bdi', {}, w[1]), w[2] ? el('span', { class: 'tx-over' }, ' over ', el('bdi', {}, w[2])) : null));
-    }
-    say.append(el('span', { class: 'tx-text', dir: 'auto' }, w ? w[3] : m[3]));
-    return el('li', { class: 'tx-line' }, el('time', {}, time), say);
-  });
-  const list = box.querySelector('.tx-lines');
-  list.replaceChildren(...items);
-  box.querySelector('.tx-meta').textContent = isLocal ? plural(lines.length, 'line') : `${plural(lines.length, 'turn')} · ${plural(speakers.size, 'speaker')}`;
-  const more = box.querySelector('.tx-more');
-  const long = lines.length > 7;
-  more.hidden = !long;
-  if (long) box.dataset.collapsed = '';
-  more.onclick = () => {
-    const collapsed = 'collapsed' in box.dataset;
-    if (collapsed) delete box.dataset.collapsed;
-    else box.dataset.collapsed = '';
-    more.textContent = collapsed ? 'Show less' : 'Show the whole transcript';
-  };
-  // the text alone: what was said, in order, without times or names
-  const raw = lines
-    .map((l) => {
-      const m = LINE.exec(l);
-      if (!m) return l;
-      const w = isLocal ? null : WHO.exec(m[3]);
-      return w ? w[3] : m[3];
-    })
-    .join('\n');
-  const copyButton = (b, value, label) => {
-    b.onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(value);
-      } catch {
-        const ta = el('textarea', { style: 'position:fixed;opacity:0' });
-        ta.value = value;
-        document.body.append(ta);
-        ta.select();
-        document.execCommand('copy');
-        ta.remove();
-      }
-      b.textContent = 'Copied';
-      b.dataset.copied = '';
-      clearTimeout(b._t);
-      b._t = setTimeout(() => {
-        b.textContent = label;
-        delete b.dataset.copied;
-      }, 1800);
-    };
-  };
-  copyButton(box.querySelector('.tx-copy'), text, 'Copy transcript');
-  copyButton(box.querySelector('.tx-copy-raw'), raw, 'Copy without names');
-  box.hidden = false;
-}
-
-async function refreshRecording(id) {
-  const fresh = (await fetch('/api/recordings').then((x) => x.json()).catch(() => [])).find((x) => x.id === id);
-  const node = recNode(id);
-  if (fresh && node) node.replaceWith(renderRecording(fresh));
-  else if (fresh) loadRecordings();
-}
-
-function showTx(t, started) {
-  const prev = started ? { ...t, status: 'started' } : tx;
-  tx = t;
-  document.querySelectorAll('.rec-item').forEach(syncTxButtons);
-  if (!t) return;
-  const node = recNode(t.id);
-  if (!node) return;
-  const prog = node.querySelector('.tx-progress');
-  const active = ['loading', 'separating', 'running', 'merging'].includes(t.status);
-  prog.hidden = !active;
-  if (active) {
-    const model = t.model ? `Whisper ${t.model}` : 'Whisper';
-    const where = t.device === 'cpu' ? 'the processor' : (whisper && whisper.gpu) || 'the graphics card';
-    const waiting = t.status === 'loading' || t.status === 'separating';
-    prog.dataset.phase = waiting ? 'loading' : t.status;
-    const pct = waiting ? 0 : t.percent;
-    node.querySelector('.tx-pct').textContent = waiting ? '…' : `${Math.floor(pct)}%`;
-    node.querySelector('.tx-label').textContent =
-      t.status === 'separating'
-        ? 'Telling the voices apart…'
-        : t.status === 'loading'
-        ? `Loading ${model}…`
-        : t.status === 'merging'
-          ? 'Adding the speaker names…'
-          : `Writing the transcript: ${mmss(t.at)} of ${mmss(t.duration)} done` + (t.etaSec != null && t.percent > 2 ? `, about ${mmss(t.etaSec)} left` : '') + ` (${model} on ${where})`;
-    node.querySelector('.tx-track > span').style.transform = waiting ? '' : `scaleX(${(pct / 100).toFixed(4)})`;
-    node.querySelector('.tx-track').setAttribute('aria-valuenow', Math.floor(pct));
-  }
-  const changed = !prev || prev.id !== t.id || prev.status !== t.status;
-  if (!changed || !prev) return; // only react to transitions seen live
-  if (t.status === 'done') refreshRecording(t.id);
-  if (t.status === 'error') {
-    const err = node.querySelector('.tx-error');
-    err.textContent = 'The transcript failed: ' + t.error;
-    err.hidden = false;
-  }
-}
-
-// ---------- wiring ----------
-$('joinForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const btn = e.submitter || $('joinForm').querySelector('button');
-  $('joinError').textContent = '';
-  if (local) {
-    $('joinError').textContent = 'A microphone recording is running. Stop it first.';
-    return;
-  }
-  btn.disabled = true;
+  $('bigBtn').disabled = true;
   try {
-    const s = await api('/api/join', { url: $('url').value, name: $('name').value, show: $('show').checked || $('talk').checked, talk: $('talk').checked });
+    const s = await api('/api/join', { url: $('url').value, name: $('name').value, title: $('newTitle').value, show: $('show').checked || $('talk').checked, talk: $('talk').checked });
     snap = s;
     receivedAt = performance.now();
+    lastStatus = s.status;
     lastPreviewAt = 0;
-    localDone = null;
     $('preview').hidden = true;
     $('previewEmpty').hidden = false;
+    $('notice').hidden = true;
     render();
-  } catch (err) {
-    $('joinError').textContent = err.message;
+    route();
+  } catch (e) {
+    err.textContent = e.message;
   } finally {
-    btn.disabled = false;
+    $('bigBtn').disabled = false;
   }
+}
+
+$('bigBtn').addEventListener('click', () => (mode === 'bot' ? join() : startLocal()));
+$('joinForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  join();
 });
-$('localBtn').addEventListener('click', startLocal);
-$('pauseBtn').addEventListener('click', () => {
-  const me = local;
-  if (!me || me.stopping) return;
-  if (me.pausedAt) {
-    me.rec.resume();
-    me.pausedMs = (me.pausedMs || 0) + (performance.now() - me.pausedAt);
-    me.pausedAt = null;
-  } else {
-    me.rec.pause();
-    me.pausedAt = performance.now();
-  }
-  render();
-});
+$('captureBtn').addEventListener('click', togglePause);
 $('stopBtn').addEventListener('click', async () => {
   if (local) return stopLocal();
   $('stopBtn').disabled = true;
@@ -966,21 +652,796 @@ $('stopBtn').addEventListener('click', async () => {
     $('stopBtn').disabled = false;
   }
 });
-$('againBtn').addEventListener('click', () => {
-  dismissedId = snap && snap.id;
-  localDone = null;
-  render();
-  $('url').focus();
-});
 window.addEventListener('beforeunload', (e) => {
   if (local) {
     e.preventDefault();
     e.returnValue = '';
   }
 });
+$('talk').addEventListener('change', () => {
+  if ($('talk').checked) $('show').checked = true;
+  renderReadiness();
+});
+$('show').addEventListener('change', () => {
+  if (!$('show').checked) $('talk').checked = false;
+  renderReadiness();
+});
+$('localCall').addEventListener('change', () => {
+  $('localHint').textContent = $('localCall').checked ? 'Also records the other people in your call. ' + callHelp(false) : 'Only your microphone is recorded.';
+  try { localStorage.setItem('echo.call', $('localCall').checked ? '1' : '0'); } catch {}
+  renderReadiness();
+});
+$('name').addEventListener('change', () => {
+  try { localStorage.setItem('echo.name', $('name').value); } catch {}
+  renderReadiness();
+});
+$('newTitle').addEventListener('input', () => isLive() && render());
 
-// When the app behind this page has stopped (quit, or the computer restarted), say so plainly instead of leaving
-// a half-empty page; reload by itself once it is back.
+// ---------- the list on the right ----------
+const txCache = new Map(); // transcript text by recording, for the search
+async function loadRecordings() {
+  recordings = await fetch('/api/recordings').then((r) => r.json()).catch(() => recordings);
+  renderRail();
+  return recordings;
+}
+function statusOf(r) {
+  if (tx && tx.id === r.id && txBusy()) return tx.status === 'separating' ? 'Telling the voices apart' : `Transcribing ${Math.floor(tx.percent || 0)}%`;
+  return r.files.some((f) => f.name === 'transcript.txt') ? 'Transcribed' : 'No transcript yet';
+}
+function renderRail() {
+  const q = $('recSearch').value.trim().toLowerCase();
+  const list = recordings.filter((r) => {
+    if (!q) return true;
+    const hay = [titleOf(r), when(r.startedAt, true), ...r.speakers, txCache.get(r.id) || ''].join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+  const box = $('recList');
+  const keep = new Map([...box.children].map((n) => [n.dataset.id, n]));
+  box.replaceChildren(
+    ...list.map((r) => {
+      let card = keep.get(r.id);
+      const meta = [when(r.startedAt), mmss(r.durationSec), statusOf(r)].filter(Boolean).join(' · ');
+      const sig = JSON.stringify([titleOf(r), meta, r.speakers]);
+      if (card && card.dataset.sig === sig) return card;
+      // keep a drawn waveform; a flat placeholder (no sound yet when it was first shown) is fetched again
+      const wave = card && card.querySelector('.wave-graphic rect') ? card.querySelector('.wave-graphic') : null;
+      card = el('a', { class: 'wave-card', href: '#rec/' + encodeURIComponent(r.id), 'data-id': r.id, 'data-sig': sig }, el('strong', { dir: 'auto' }, titleOf(r)), wave || waveGraphic(null), el('small', {}, meta));
+      if (!wave) loadPeaks(card, r.id);
+      return card;
+    })
+  );
+  $('recEmpty').hidden = recordings.length > 0;
+  $('recEmpty').textContent = recordings.length ? '' : 'No recordings yet. Press the microphone to make the first one.';
+  if (recordings.length && !list.length) box.append(el('p', { class: 'rail-empty' }, 'Nothing matches that.'));
+  markSelected();
+}
+function markSelected() {
+  const w = where();
+  for (const c of document.querySelectorAll('.wave-card')) c.classList.toggle('selected', w.page === 'rec' && c.dataset.id === w.id);
+}
+const peaksSeen = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    if (!e.isIntersecting) continue;
+    peaksSeen.unobserve(e.target);
+    const id = e.target.dataset.id;
+    fetch('/api/peaks/' + encodeURIComponent(id))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && e.target.querySelector('.wave-graphic').replaceWith(waveGraphic(d)))
+      .catch(() => {});
+  }
+});
+const loadPeaks = (card) => peaksSeen.observe(card);
+function waveGraphic(data) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 360 70');
+  svg.setAttribute('class', 'wave-graphic');
+  svg.setAttribute('aria-hidden', 'true');
+  const peaks = (data && data.peaks) || [];
+  if (!peaks.length) {
+    const line = document.createElementNS(NS, 'path');
+    line.setAttribute('d', 'M0 35H360');
+    line.setAttribute('stroke', 'currentColor');
+    line.setAttribute('opacity', '.25');
+    svg.append(line);
+    return svg;
+  }
+  const many = (data.speakers || []).some((x) => x != null);
+  peaks.forEach((v, i) => {
+    const bar = document.createElementNS(NS, 'rect');
+    const h = Math.max(2, Math.min(1, v) * 62);
+    const who = many ? data.speakers[i] : 0;
+    bar.setAttribute('x', String((i * 360) / peaks.length));
+    bar.setAttribute('y', String((70 - h) / 2));
+    bar.setAttribute('width', String(Math.max(1, 360 / peaks.length - 1.2)));
+    bar.setAttribute('height', String(h));
+    bar.setAttribute('rx', '1.4');
+    bar.setAttribute('fill', who == null ? '#526773' : WAVE[who % WAVE.length]);
+    svg.append(bar);
+  });
+  return svg;
+}
+let searchLoaded = false;
+$('recSearch').addEventListener('input', async () => {
+  renderRail();
+  // words said in the meetings are searchable too: their transcripts are fetched once, on the first search
+  if (searchLoaded) return;
+  searchLoaded = true;
+  await Promise.all(recordings.filter((r) => r.files.some((f) => f.name === 'transcript.txt')).map((r) =>
+    fetch(`/rec/${r.id}/transcript.txt`).then((x) => (x.ok ? x.text() : '')).then((t) => txCache.set(r.id, t)).catch(() => {})
+  ));
+  renderRail();
+});
+
+// ---------- one recording ----------
+let currentRecTab = 'details';
+function showRecTab(name) {
+  currentRecTab = name;
+  for (const b of document.querySelectorAll('#recTabs [data-tab]')) b.setAttribute('aria-selected', String(b.dataset.tab === name));
+  $('infoBody').hidden = name !== 'details';
+  $('peopleBody').hidden = name !== 'people';
+}
+for (const b of document.querySelectorAll('#recTabs [data-tab]')) b.addEventListener('click', () => showRecTab(b.dataset.tab));
+
+function closeRecording() {
+  if (!current) return;
+  $('audio').pause();
+  current = null;
+}
+
+async function openRecording(id) {
+  if (!recordings.some((r) => r.id === id)) await loadRecordings();
+  const r = recordings.find((x) => x.id === id);
+  if (!r) {
+    location.hash = '#record';
+    return;
+  }
+  const fresh = !current || current.id !== id;
+  current = { ...(fresh ? {} : current), id, rec: r };
+  $('recCardTitle').textContent = 'Recording details';
+  // header
+  $('recTitle').textContent = titleOf(r);
+  if (document.activeElement !== $('recTitleInput')) $('recTitleInput').value = r.title || '';
+  $('recTitleInput').placeholder = titleOf(r);
+  const chips = [
+    el('span', {}, when(r.startedAt, true)),
+    el('span', {}, length(r.durationSec)),
+    el('span', { class: 'chip' }, icon(r.kind === 'local' ? 'laptop' : 'bot'), r.kind === 'local' ? 'On this computer' : 'Google Meet'),
+  ];
+  if (r.speakers.length) chips.push(el('span', { class: 'names' }, r.speakers.join(' · ')));
+  $('recMeta').replaceChildren(...chips);
+  // downloads
+  const has = (n) => r.files.find((f) => f.name === n);
+  const dl = (name, label, about) => {
+    const f = has(name);
+    return f ? el('a', { class: 'download', href: `/rec/${r.id}/${name}?download`, download: name }, icon('download'), el('span', {}, el('b', {}, label), el('small', {}, `${about} · ${bytes(f.bytes).join(' ')}`))) : null;
+  };
+  $('exportOptions').replaceChildren(
+    el('section', {}, el('h3', {}, 'Transcript'),
+      dl('transcript.txt', 'Text', '.txt'),
+      dl('transcript.srt', 'Subtitles', '.srt'),
+      has('transcript.json') ? el('button', { type: 'button', class: 'download', onclick: downloadMarkdown }, icon('download'), el('span', {}, el('b', {}, 'Markdown'), el('small', {}, '.md, for notes and documents'))) : null,
+      !has('transcript.txt') ? el('p', { class: 'muted' }, 'After it is transcribed.') : null
+    ),
+    el('section', {}, el('h3', {}, 'Recording'), dl('audio.wav', 'Audio', '.wav'), dl('video.mp4', 'Video', '.mp4'), dl('speakers.csv', 'Who spoke when', '.csv'))
+  );
+  $('exportMenu').open = false;
+  // facts on the left
+  const total = r.files.reduce((a, f) => a + f.bytes, 0);
+  const fact = (k, v) => [el('dt', {}, k), el('dd', {}, v)];
+  $('recFacts').replaceChildren(
+    ...fact('Recorded', when(r.startedAt, true)),
+    ...fact('Length', length(r.durationSec)),
+    ...fact('How', r.kind === 'local' ? (r.source === 'microphone+computer' ? 'This computer: microphone and call sound' : "This computer's microphone") : 'The bot, in ' + (r.meetUrl || 'Google Meet').replace(/^https?:\/\//, '')),
+    ...fact('Voices', r.speakers.length ? String(r.speakers.length) : r.people === 1 ? 'One' : 'Not told apart'),
+    ...fact('On disk', bytes(total).join(' '))
+  );
+  $('mergePick').hidden = !(r.kind !== 'local' && r.segments);
+  $('recWatch').hidden = !has('video.mp4');
+  if (fresh) showVideo(false);
+  syncTranscribe();
+  // people
+  renderPeopleEdit(r);
+  // sound
+  if (fresh) {
+    const a = $('audio');
+    a.pause();
+    a.src = has('audio.wav') ? `/rec/${r.id}/audio.wav` : '';
+    a.playbackRate = Number($('speed').value) || 1;
+    $('player').hidden = !has('audio.wav');
+    $('txSearch').value = '';
+    current.filter = null;
+    updatePlayer();
+  }
+  await loadTranscript(r, fresh);
+  markSelected();
+  showTx(tx);
+}
+
+function syncTranscribe() {
+  const r = current && current.rec;
+  if (!r) return;
+  const hasAudio = r.files.some((f) => f.name === 'audio.wav');
+  const off = !hasAudio || txBusy() || (whisper && !whisper.available);
+  $('retranscribe').disabled = off;
+  $('transcribeBtn').disabled = off;
+  const reason = whisper && !whisper.available ? 'The transcriber needs its model first (Models and storage).' : txBusy() && tx.id !== r.id ? 'Another recording is being transcribed.' : '';
+  $('retranscribe').title = reason;
+  $('transcribeBtn').title = reason;
+}
+
+function renderPeopleEdit(r) {
+  const box = $('peopleList');
+  if (!r.speakers.length) {
+    $('peopleNote').textContent = r.people === 1 ? 'One voice: this recording was made as "Just me".' : 'The voices in this recording are not told apart yet. Transcribe it to find them.';
+    box.replaceChildren();
+    return;
+  }
+  $('peopleNote').textContent = 'Give each voice a name. The whole transcript follows.';
+  box.replaceChildren(
+    ...r.speakers.map((n, i) => {
+      const input = el('input', { type: 'text', value: n, 'aria-label': `Name for ${n}`, maxlength: '60', dir: 'auto' });
+      const save = async () => {
+        const to = input.value.trim();
+        if (!to || to === n) return void (input.value = n);
+        try {
+          await api('/api/rename/' + r.id, { from: n, to });
+          toast(`${n} is now ${to}`);
+          await loadRecordings();
+          if (current && current.id === r.id) openRecording(r.id);
+        } catch (e) {
+          toast(e.message);
+          input.value = n;
+        }
+      };
+      input.addEventListener('change', save);
+      input.addEventListener('keydown', (e) => e.key === 'Enter' && input.blur());
+      return el('label', { class: 'person-edit', style: `--c:${WAVE[i % WAVE.length]}` }, el('span', { class: 'dot', 'aria-hidden': 'true' }), input);
+    })
+  );
+}
+
+const LINE = /^\[(\d\d):(\d\d):(\d\d) - (\d\d):(\d\d):(\d\d)\] (.*)$/;
+async function loadTranscript(r, fresh) {
+  const hasTx = r.files.some((f) => f.name === 'transcript.txt');
+  $('txEmpty').hidden = hasTx;
+  $('txBox').hidden = !hasTx;
+  $('copyAll').hidden = $('copyRaw').hidden = !hasTx;
+  $('txEmptyText').textContent = txBusy() && tx.id === r.id ? 'The transcript is being written now.' : 'No transcript yet.';
+  $('transcribeBtn').hidden = txBusy() && tx.id === r.id;
+  if (!hasTx) {
+    $('txMeta').textContent = '';
+    $('txLines').replaceChildren();
+    $('speakerFilter').replaceChildren();
+    renderTimeline(r, []);
+    return;
+  }
+  if (fresh || !current.turns) {
+    const [text, json] = await Promise.all([
+      fetch(`/rec/${r.id}/transcript.txt`, { cache: 'no-store' }).then((x) => (x.ok ? x.text() : '')).catch(() => ''),
+      fetch(`/rec/${r.id}/transcript.json`, { cache: 'no-store' }).then((x) => (x.ok ? x.json() : null)).catch(() => null),
+    ]);
+    if (!current || current.id !== r.id) return;
+    current.text = text;
+    current.turns = json && json.turns ? json.turns : text.trim().split('\n').map((l) => {
+      const m = LINE.exec(l);
+      return m ? { start: +m[1] * 3600 + +m[2] * 60 + +m[3], end: +m[4] * 3600 + +m[5] * 60 + +m[6], speaker: 'Unknown', text: m[7] } : { start: 0, end: 0, speaker: 'Unknown', text: l };
+    });
+  }
+  const turns = current.turns;
+  // speakers in order of first appearance: the same colours as the list on the right
+  const order = [...new Set(turns.map((t) => t.speaker).filter((s) => s && s !== 'Unknown'))];
+  current.speakers = order;
+  const named = order.length > 0;
+  $('txMeta').textContent = turns.length ? (named ? `${plural(turns.length, 'turn')} · ${plural(order.length, 'speaker')}` : plural(turns.length, 'line')) : 'No speech was found in this recording.';
+  if (!turns.length) $('copyAll').hidden = $('copyRaw').hidden = true;
+  $('speakerFilter').hidden = order.length < 2;
+  $('speakerFilter').replaceChildren(
+    el('span', { class: 'muted' }, 'Speakers'),
+    el('button', { type: 'button', class: 'chip-btn', 'aria-pressed': String(!current.filter), onclick: () => setFilter(null) }, 'All speakers'),
+    ...order.map((s, i) => el('button', { type: 'button', class: 'chip-btn', style: `--c:${INK[i % INK.length]}`, 'aria-pressed': String(current.filter === s), onclick: () => setFilter(s) }, el('span', { class: 'dot', 'aria-hidden': 'true' }), s))
+  );
+  $('txLines').replaceChildren(
+    ...turns.map((t, i) => {
+      const c = order.indexOf(t.speaker);
+      const li = el('li', { class: 'tx-line', 'data-i': String(i), 'data-speaker': t.speaker || '', style: c >= 0 ? `--c:${INK[c % INK.length]}` : null },
+        el('button', { type: 'button', class: 'time-link', title: 'Play from here', onclick: () => seek(t.start, true) }, mmss(t.start)),
+        el('div', { class: 'tx-say' },
+          named && t.speaker !== 'Unknown' ? el('span', { class: 'tx-who' }, el('span', { class: 'dot', 'aria-hidden': 'true' }), el('bdi', {}, t.speaker), t.also && t.also.length ? el('span', { class: 'tx-over' }, ' over ', el('bdi', {}, t.also.join(', '))) : null) : null,
+          el('p', { class: 'tx-text', dir: 'auto' }, t.text)
+        )
+      );
+      return li;
+    })
+  );
+  renderTimeline(r, turns);
+  applySearch(false);
+}
+function setFilter(s) {
+  current.filter = s;
+  for (const b of document.querySelectorAll('#speakerFilter .chip-btn')) b.setAttribute('aria-pressed', String(b.textContent === (s || 'All speakers')));
+  for (const li of document.querySelectorAll('#txLines .tx-line')) li.hidden = !!s && li.dataset.speaker !== s;
+  applySearch(false);
+}
+
+// who spoke when, across the whole recording: one row per speaker; click to listen from there
+function renderTimeline(r, turns) {
+  const box = $('timeline');
+  let segs = turns.filter((t) => t.speaker && t.speaker !== 'Unknown');
+  const order = (current && current.speakers) || [];
+  if (order.length < 2) return void (box.hidden = true, box.replaceChildren());
+  box.hidden = false;
+  const dur = Math.max(1, r.durationSec || Math.max(...segs.map((s) => s.end)));
+  box.replaceChildren(
+    ...order.map((name, i) =>
+      el('div', { class: 'timeline-row', style: `--c:${INK[i % INK.length]}` },
+        el('span', { class: 'timeline-name', title: name }, name),
+        el('div', { class: 'timeline-track', onclick: (e) => { const b = e.currentTarget.getBoundingClientRect(); seek(((e.clientX - b.left) / b.width) * dur, true); } },
+          ...segs.filter((s) => s.speaker === name).map((s) => el('i', { style: `left:${((s.start / dur) * 100).toFixed(3)}%;width:${Math.max(0.25, ((s.end - s.start) / dur) * 100).toFixed(3)}%` })),
+          el('b', { class: 'playhead', 'aria-hidden': 'true' })
+        )
+      )
+    )
+  );
+}
+
+// search inside the transcript: every match marked, Previous and Next step through them
+let hits = [];
+let hitAt = -1;
+function applySearch(jump) {
+  const q = $('txSearch').value.trim();
+  hits = [];
+  for (const li of document.querySelectorAll('#txLines .tx-line')) {
+    const p = li.querySelector('.tx-text');
+    const t = current.turns[+li.dataset.i].text;
+    if (!q || li.hidden) {
+      if (p.childElementCount) p.textContent = t;
+      continue;
+    }
+    const low = t.toLowerCase();
+    const ql = q.toLowerCase();
+    let at = low.indexOf(ql);
+    if (at < 0) {
+      if (p.childElementCount) p.textContent = t;
+      continue;
+    }
+    const parts = [];
+    let from = 0;
+    while (at >= 0) {
+      parts.push(t.slice(from, at));
+      const m = el('mark', {}, t.slice(at, at + q.length));
+      parts.push(m);
+      hits.push(m);
+      from = at + q.length;
+      at = low.indexOf(ql, from);
+    }
+    parts.push(t.slice(from));
+    p.replaceChildren(...parts);
+  }
+  $('txMatches').textContent = q ? plural(hits.length, 'match', 'matches') : '';
+  $('txPrev').disabled = $('txNext').disabled = hits.length < 1;
+  hitAt = -1;
+  if (jump && hits.length) step(1);
+}
+function step(d) {
+  if (!hits.length) return;
+  if (hits[hitAt]) hits[hitAt].classList.remove('current');
+  hitAt = (hitAt + d + hits.length) % hits.length;
+  hits[hitAt].classList.add('current');
+  hits[hitAt].scrollIntoView({ block: 'center', behavior: 'smooth' });
+  $('txMatches').textContent = `${hitAt + 1} of ${plural(hits.length, 'match', 'matches')}`;
+}
+$('txSearch').addEventListener('input', () => applySearch(true));
+$('txSearch').addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), step(e.shiftKey ? -1 : 1)));
+$('txPrev').addEventListener('click', () => step(-1));
+$('txNext').addEventListener('click', () => step(1));
+
+// copying: with times and names, or just what was said
+$('copyAll').addEventListener('click', async () => {
+  await copy(current.text);
+  toast('Transcript copied');
+});
+$('copyRaw').addEventListener('click', async () => {
+  await copy(current.turns.map((t) => t.text).join('\n'));
+  toast('Copied without names or times');
+});
+function downloadMarkdown() {
+  const r = current.rec;
+  const named = current.speakers.length > 0;
+  const md = [`# ${titleOf(r)}`, '', `${when(r.startedAt, true)} · ${length(r.durationSec)}${named ? ` · ${current.speakers.join(', ')}` : ''}`, '', ...current.turns.map((t) => `**${mmss(t.start)}**${named && t.speaker !== 'Unknown' ? ` **${t.speaker}:**` : ''} ${t.text}\n`)].join('\n');
+  const a = el('a', { href: URL.createObjectURL(new Blob([md], { type: 'text/markdown' })), download: `${(r.title || 'transcript-' + r.id).replace(/[\\/:*?"<>|]+/g, '-')}.md` });
+  document.body.append(a);
+  a.click();
+  a.remove();
+}
+
+// renaming: the pencil in the header, or the Title field on the left
+async function saveTitle(title) {
+  const r = current && current.rec;
+  if (!r) return;
+  try {
+    await api('/api/rec-title/' + r.id, { title });
+    await loadRecordings();
+    if (current && current.id === r.id) openRecording(r.id);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+let titleTimer;
+$('recTitleInput').addEventListener('input', () => {
+  clearTimeout(titleTimer);
+  titleTimer = setTimeout(() => saveTitle($('recTitleInput').value), 600);
+});
+$('recRename').addEventListener('click', () => {
+  $('recCard').open = true;
+  showRecTab('details');
+  $('recTitleInput').focus();
+  $('recTitleInput').select();
+});
+// the bot's video, with who is speaking as captions
+function showVideo(on) {
+  const box = $('videoBox');
+  $('recWatch').querySelector('span').textContent = on ? 'Hide the video' : 'Watch with names';
+  if (!on) {
+    box.hidden = true;
+    box.replaceChildren();
+    return;
+  }
+  audio.pause();
+  const id = current.id;
+  const v = el('video', { controls: true, preload: 'metadata', src: `/rec/${id}/video.mp4` });
+  v.append(el('track', { kind: 'captions', label: 'Speakers', srclang: 'en', src: `/rec/${id}/speakers.vtt`, default: true }));
+  box.replaceChildren(v);
+  box.hidden = false;
+}
+$('recWatch').addEventListener('click', () => showVideo($('videoBox').hidden));
+$('recOpen').addEventListener('click',() => api('/api/open/' + current.id).catch((e) => toast(e.message)));
+$('recDelete').addEventListener('click', async () => {
+  const r = current.rec;
+  const sure = await confirmBox({ title: 'Delete this recording?', text: `"${titleOf(r)}", its audio and its transcript are removed from this computer. This cannot be undone.`, ok: 'Delete' });
+  if (!sure) return;
+  try {
+    await api('/api/rec-delete/' + r.id);
+    closeRecording();
+    await loadRecordings();
+    location.hash = '#record';
+    toast('Deleted');
+  } catch (e) {
+    toast(e.message);
+  }
+});
+async function transcribe() {
+  const r = current.rec;
+  $('txError').hidden = true;
+  $('retranscribe').disabled = $('transcribeBtn').disabled = true;
+  try {
+    showTx(await api('/api/transcribe/' + r.id, { model: $('whisperModel').value || undefined }), true);
+  } catch (e) {
+    $('txError').textContent = e.message;
+    $('txError').hidden = false;
+    syncTranscribe();
+  }
+}
+$('retranscribe').addEventListener('click', transcribe);
+$('transcribeBtn').addEventListener('click', transcribe);
+$('txCancel').addEventListener('click', () => api('/api/transcribe-cancel').catch(() => {}));
+$('mergePick').querySelector('input').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try {
+    await api('/api/merge/' + current.id, { filename: f.name, content: await f.text() });
+    current.turns = null;
+    await loadRecordings();
+    openRecording(current.id);
+  } catch (err) {
+    $('txError').textContent = 'Could not use that file: ' + err.message;
+    $('txError').hidden = false;
+  }
+  e.target.value = '';
+});
+
+// ---------- the player ----------
+const audio = $('audio');
+function seek(sec, play) {
+  if (!audio.src) return;
+  audio.currentTime = Math.max(0, sec);
+  if (play) audio.play().catch(() => {});
+  updatePlayer();
+}
+let nowLine = null;
+function updatePlayer() {
+  const d = audio.duration || (current && current.rec && current.rec.durationSec) || 0;
+  const t = audio.currentTime || 0;
+  $('playerTime').textContent = `${mmss(t)} / ${mmss(d)}`;
+  if (document.activeElement !== $('seek')) $('seek').value = d ? Math.round((t / d) * 1000) : 0;
+  $('player').classList.toggle('playing', !audio.paused);
+  $('playBtn').setAttribute('aria-label', audio.paused ? 'Play' : 'Pause');
+  for (const h of document.querySelectorAll('.timeline .playhead')) h.style.left = d ? `${((t / d) * 100).toFixed(2)}%` : '0';
+  // the line being heard now
+  if (current && current.turns) {
+    const i = current.turns.findIndex((x, k) => t >= x.start && t < (current.turns[k + 1] ? current.turns[k + 1].start : Infinity));
+    const li = i >= 0 ? document.querySelector(`#txLines [data-i="${i}"]`) : null;
+    if (li !== nowLine) {
+      if (nowLine) nowLine.classList.remove('now');
+      if (li && t > 0) li.classList.add('now');
+      nowLine = li;
+    }
+  }
+}
+['timeupdate', 'play', 'pause', 'loadedmetadata', 'ended', 'seeked'].forEach((e) => audio.addEventListener(e, updatePlayer));
+$('playBtn').addEventListener('click', () => (audio.paused ? audio.play().catch(() => {}) : audio.pause()));
+$('back10').addEventListener('click', () => seek(audio.currentTime - 10));
+$('fwd10').addEventListener('click', () => seek(audio.currentTime + 10));
+$('seek').addEventListener('input', () => {
+  const d = audio.duration || 0;
+  if (d) audio.currentTime = (Number($('seek').value) / 1000) * d;
+});
+$('speed').addEventListener('change', () => (audio.playbackRate = Number($('speed').value) || 1));
+
+// ---------- transcription ----------
+async function loadWhisper() {
+  try {
+    whisper = await fetch('/api/whisper').then((r) => r.json());
+  } catch {
+    whisper = { available: false, reason: 'Could not check for the transcriber.' };
+  }
+  const where_ = whisper.device && whisper.device !== 'cpu' ? whisper.gpu || 'the graphics card' : 'the processor';
+  const catalog = whisper.catalog || [];
+  const titled = (name) => { const c = catalog.find((x) => x.key === name); return c ? `${c.title} (${name})` : name; };
+  const sel = $('whisperModel');
+  sel.replaceChildren(...(whisper.models || []).map((m) => el('option', { value: m.name }, titled(m.name))));
+  if (whisper.chosen) sel.value = whisper.chosen;
+  sel.disabled = !whisper.available || (whisper.models || []).length < 2;
+  $('engine').dataset.state = whisper.available ? 'ready' : 'missing';
+  $('engineText').textContent = whisper.available ? `Transcriber ready · ${titled(whisper.chosen || whisper.models[0].name)} on ${where_}` : whisper.engine ? 'The transcriber needs a model: open Models and storage' : 'The transcriber is not installed';
+  $('whisperText').textContent = whisper.available
+    ? `Runs on ${where_}. Choose the model new transcripts use.`
+    : whisper.engine
+      ? 'Choose a model to download. After that the transcriber works without the internet.'
+      : 'The transcriber is not installed yet. Open the ICAIRE Echo app once; it sets it up.';
+  renderModels();
+  syncTranscribe();
+  renderReadiness();
+}
+let modelSetup = null;
+function renderModels() {
+  const box = $('modelList');
+  if (!whisper || !whisper.engine) return void box.replaceChildren();
+  const busy = modelSetup && modelSetup.status === 'running';
+  box.replaceChildren(
+    ...(whisper.catalog || []).map((c) => {
+      const inUse = c.installed && whisper.chosen === c.key;
+      const downloading = busy && modelSetup.name === c.key;
+      let act;
+      if (inUse) act = el('span', { class: 'in-use' }, icon('check'), 'In use');
+      else if (c.installed) act = el('button', { type: 'button', class: 'small', onclick: () => chooseModel(c.key) }, 'Use this');
+      else act = el('button', { type: 'button', class: 'small' + (c.recommended && !whisper.available ? ' primary' : ''), disabled: busy, onclick: () => getModel(c.key) }, icon('download'), downloading ? 'Downloading…' : 'Download');
+      return el('div', { class: 'model' + (inUse ? ' on' : ''), role: 'listitem' },
+        el('div', { class: 'model-text' },
+          el('h3', {}, c.title, c.recommended ? el('span', { class: 'tag' }, 'Recommended') : null),
+          el('p', {}, c.about),
+          el('small', {}, `${bytes(c.bytes).join(' ')} · ${c.key}${c.installed ? ' · on this computer' : ''}`)
+        ),
+        act
+      );
+    })
+  );
+}
+async function chooseModel(key) {
+  try {
+    await api('/api/whisper/choose', { model: key });
+    toast('New transcripts use this model');
+    loadWhisper();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+async function getModel(key) {
+  try {
+    showWhisperSetup(await api('/api/whisper/setup', { model: key }));
+  } catch (e) {
+    toast(e.message);
+  }
+}
+function showWhisperSetup(s) {
+  if (!s) return;
+  const was = modelSetup && modelSetup.status;
+  modelSetup = s;
+  const prog = $('whisperProg');
+  prog.hidden = s.status !== 'running';
+  if (s.status === 'running') {
+    const gb = (n) => (n / 1e9).toFixed(2);
+    $('whisperPct').textContent = Math.floor(s.percent) + '%';
+    $('whisperLabel').textContent = `Downloading ${s.name}: ${gb(s.got)} of ${gb(s.total)} GB`;
+    $('whisperBar').style.transform = `scaleX(${(s.percent / 100).toFixed(4)})`;
+    $('engineText').textContent = `Downloading the transcriber model: ${Math.floor(s.percent)}%`;
+  } else if (s.status === 'error' && was !== 'error') $('whisperText').textContent = 'The download stopped: ' + s.error;
+  if (s.status !== was) (s.status === 'done' ? loadWhisper() : renderModels());
+}
+
+function showTx(t, started) {
+  const prev = started ? { ...t, status: 'started' } : tx;
+  tx = t;
+  syncTranscribe();
+  // the list shows progress on the card
+  const r = t && recordings.find((x) => x.id === t.id);
+  if (r) renderRail();
+  if (!t) return;
+  const open = current && current.id === t.id;
+  const active = txBusy();
+  if (open) {
+    $('txProg').hidden = !active;
+    if (active) {
+      const model = t.model ? `Whisper ${t.model}` : 'Whisper';
+      const waiting = t.status === 'loading' || t.status === 'separating';
+      $('txProg').dataset.phase = waiting ? 'loading' : t.status;
+      const pct = waiting ? 0 : t.percent;
+      $('txPct').textContent = waiting ? '…' : `${Math.floor(pct)}%`;
+      $('txLabel').textContent = t.status === 'separating'
+        ? 'Telling the voices apart…'
+        : t.status === 'loading'
+          ? `Loading ${model}…`
+          : t.status === 'merging'
+            ? 'Adding the speaker names…'
+            : `Writing the transcript: ${mmss(t.at)} of ${mmss(t.duration)}` + (t.etaSec != null && t.percent > 2 ? `, about ${mmss(t.etaSec)} left` : '');
+      $('txBar').style.transform = waiting ? '' : `scaleX(${(pct / 100).toFixed(4)})`;
+      $('txEmptyText').textContent = 'The transcript is being written now.';
+      $('transcribeBtn').hidden = true;
+    }
+  }
+  const changed = !prev || prev.id !== t.id || prev.status !== t.status;
+  if (!changed || !prev) return; // only react to transitions seen live
+  if (t.status === 'done' || t.status === 'error' || t.status === 'cancelled') {
+    loadRecordings().then(() => {
+      if (current && current.id === t.id) {
+        current.turns = null;
+        openRecording(t.id);
+      }
+    });
+  }
+  if (t.status === 'error' && open) {
+    $('txError').textContent = 'The transcript failed: ' + t.error;
+    $('txError').hidden = false;
+  }
+}
+
+// ---------- models and storage ----------
+async function loadStorage() {
+  let s;
+  try {
+    s = await fetch('/api/storage').then((r) => r.json());
+  } catch {
+    return;
+  }
+  const size = (n) => bytes(n).join(' ');
+  $('storeFree').textContent = s.free != null ? `Free space on this computer: ${size(s.free)}` : '';
+  const row = (name, about, n, act) => el('div', { class: 'storage-item' }, el('div', {}, el('h3', {}, name), el('p', { class: 'muted' }, `${size(n)} · ${about}`)), act);
+  const open = (which) => el('button', { type: 'button', class: 'small', onclick: () => api('/api/storage/open', { which }).catch((e) => toast(e.message)) }, icon('files'), SHOW_IN);
+  $('storeList').replaceChildren(
+    row('Recordings', 'Your audio and transcripts', s.recordings, open('recordings')),
+    row('Voice-overs', 'The voice-overs you made', s.voiceovers, open('voiceovers')),
+    ...s.models.map((m) =>
+      row(m.name, m.about, m.bytes, m.removable ? el('button', {
+        type: 'button',
+        class: 'small quiet-danger',
+        onclick: async () => {
+          const sure = await confirmBox({ title: `Remove ${m.name}?`, text: `${size(m.bytes)} is freed. It is downloaded again when it is needed.`, ok: 'Remove' });
+          if (!sure) return;
+          try {
+            await api('/api/storage/remove', { key: m.key });
+            toast('Removed');
+            loadStorage();
+            loadWhisper();
+          } catch (e) {
+            toast(e.message);
+          }
+        },
+      }, icon('trash'), 'Remove') : null)
+    ),
+    el('div', { class: 'storage-foot' }, open('models'), el('span', { class: 'muted' }, 'The models folder'))
+  );
+}
+
+// ---------- updates ----------
+function showUpdate(u) {
+  update = u;
+  const busy = u.status === 'checking' || u.status === 'updating' || u.status === 'updated';
+  const label = u.status === 'available' ? 'Update now' : 'Check for updates';
+  const text = u.status === 'checking' ? 'Checking…'
+    : u.status === 'available' ? 'A new version is ready' + (u.latest && u.latest.message ? `: ${u.latest.message}` : '')
+      : u.status === 'updating' ? 'Updating…'
+        : u.status === 'updated' ? 'Updated. Restarting…'
+          : u.status === 'current' ? 'Up to date'
+            : u.status === 'error' ? u.error : '';
+  for (const b of [$('updateBtn'), $('updateBtn2')]) {
+    b.disabled = busy;
+    b.querySelector('span').textContent = label;
+    b.classList.toggle('primary', u.status === 'available');
+  }
+  $('updateText').textContent = text;
+  $('updateText2').textContent = text || 'ICAIRE Echo checks for a new version every few hours and updates itself when nothing is running.';
+  $('versionNote').textContent = u.current ? `Version ${u.current}` : '';
+  $('appMenu').classList.toggle('has-update', u.status === 'available');
+  if (u.status === 'updated') waitForRestart();
+}
+let restarting = false;
+function waitForRestart() {
+  if (restarting) return;
+  restarting = true;
+  // the app starts again by itself; reload once it answers, to show the new version
+  const tryIt = () => fetch('/api/state', { cache: 'no-store' }).then((r) => (r.ok ? location.reload() : setTimeout(tryIt, 1500))).catch(() => setTimeout(tryIt, 1500));
+  setTimeout(tryIt, 4000);
+}
+async function updateClick() {
+  const apply = update && update.status === 'available';
+  try {
+    showUpdate(await api(apply ? '/api/update/apply' : '/api/update/check'));
+  } catch (e) {
+    $('updateText').textContent = $('updateText2').textContent = e.message;
+  }
+}
+$('updateBtn').addEventListener('click', updateClick);
+$('updateBtn2').addEventListener('click', updateClick);
+
+// ---------- the More menu ----------
+$('openRecordings').addEventListener('click', () => api('/api/storage/open', { which: 'recordings' }).catch((e) => toast(e.message)));
+$('loginBtn').addEventListener('click', async () => {
+  try {
+    await api('/api/login');
+    toast('Sign in in the window that opened, then close it.');
+  } catch (e) {
+    toast(e.message);
+  }
+});
+// the Mac app has no window of its own: this ends it
+$('quitBtn').addEventListener('click', async () => {
+  try {
+    await api('/api/quit');
+    document.body.replaceChildren(el('main', { class: 'stopped' }, el('h1', {}, 'ICAIRE Echo has stopped.'), el('p', {}, 'Open the ICAIRE Echo app to start it again. You can close this tab.')));
+  } catch (e) {
+    toast(e.message);
+  }
+});
+document.addEventListener('click', (e) => {
+  for (const d of document.querySelectorAll('.app-menu[open], .export-menu[open]')) if (!d.contains(e.target)) d.open = false;
+});
+
+// A confirmation pop-up: resolves true when the person presses the action, false on Cancel or Escape
+function confirmBox({ title, text, ok = 'Delete' }) {
+  const d = $('confirm');
+  $('confirmTitle').textContent = title;
+  $('confirmText').textContent = text;
+  $('confirmOk').textContent = ok;
+  d.returnValue = '';
+  d.showModal();
+  d.querySelector('[value="cancel"]').focus();
+  return new Promise((resolve) => d.addEventListener('close', () => resolve(d.returnValue === 'ok'), { once: true }));
+}
+window.confirmBox = confirmBox;
+
+// ---------- keyboard ----------
+document.addEventListener('keydown', (e) => {
+  const typing = e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"]');
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'r') {
+    e.preventDefault();
+    if (!isLive()) {
+      if (where().family !== 'record' || where().page === 'rec') location.hash = '#record';
+      mode === 'bot' ? join() : startLocal();
+    }
+    return;
+  }
+  if (typing || $('confirm').open || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === ' ') {
+    if (local && where().page === 'live') (e.preventDefault(), togglePause());
+    else if (where().page === 'rec' && audio.src) (e.preventDefault(), audio.paused ? audio.play().catch(() => {}) : audio.pause());
+  } else if (e.key === '/' && where().page === 'rec' && !$('txBox').hidden) {
+    e.preventDefault();
+    $('txSearch').focus();
+  }
+});
+
+// ---------- the connection ----------
+// When the app behind this page has stopped (quit, or the computer restarted), say so plainly; reload by itself once it is back.
 let lostSince = 0;
 function showGone(gone) {
   if (!gone) {
@@ -992,7 +1453,6 @@ function showGone(gone) {
   if (!lostSince) lostSince = Date.now();
   $('gone').hidden = false;
 }
-
 function connect() {
   const es = new EventSource('/api/stream');
   es.onerror = () => showGone(true);
@@ -1010,117 +1470,21 @@ function connect() {
   };
 }
 
-// ---------- updates ----------
-let update = null;
-function showUpdate(u) {
-  update = u;
-  const btn = $('updateBtn');
-  const text = $('updateText');
-  const busy = u.status === 'checking' || u.status === 'updating' || u.status === 'updated';
-  btn.disabled = busy;
-  btn.textContent = u.status === 'available' ? 'Update now' : 'Check for updates';
-  btn.hidden = u.status === 'updated';
-  text.textContent =
-    u.status === 'checking' ? 'Checking…'
-      : u.status === 'available' ? 'A new version is ready'
-        : u.status === 'updating' ? 'Updating…'
-          : u.status === 'updated' ? 'Updated. Restarting…'
-            : u.status === 'current' ? 'Up to date'
-              : u.status === 'error' ? u.error
-                : '';
-  text.title = u.latest && u.status === 'available' ? u.latest.message : '';
-  $('update').dataset.state = u.status;
-  if (u.status === 'updated') waitForRestart();
-}
-let restarting = false;
-function waitForRestart() {
-  if (restarting) return;
-  restarting = true;
-  // the app starts again by itself; reload once it answers, to show the new version
-  const tryIt = () => fetch('/api/state', { cache: 'no-store' }).then((r) => (r.ok ? location.reload() : setTimeout(tryIt, 1500))).catch(() => setTimeout(tryIt, 1500));
-  setTimeout(tryIt, 4000);
-}
-$('updateBtn').addEventListener('click', async () => {
-  const apply = update && update.status === 'available';
-  try {
-    showUpdate(await api(apply ? '/api/update/apply' : '/api/update/check'));
-  } catch (e) {
-    $('updateText').textContent = e.message;
-  }
-});
-
-// A confirmation pop-up: resolves true when the person presses the action, false on Cancel or Escape
-function confirmBox({ title, text, ok = 'Delete' }) {
-  const d = $('confirm');
-  $('confirmTitle').textContent = title;
-  $('confirmText').textContent = text;
-  $('confirmOk').textContent = ok;
-  d.returnValue = '';
-  d.showModal();
-  d.querySelector('[value="cancel"]').focus();
-  return new Promise((resolve) => d.addEventListener('close', () => resolve(d.returnValue === 'ok'), { once: true }));
-}
-window.confirmBox = confirmBox;
-
-// talking in the bot's window needs the window
-$('talk').addEventListener('change', () => { if ($('talk').checked) $('show').checked = true; });
-$('loginBtn').addEventListener('click', async () => {
-  try {
-    await api('/api/login');
-    $('loginBtn').textContent = 'Sign in in the window that opened, then close it';
-  } catch (e) {
-    alert(e.message);
-  }
-});
-
-// the Mac app has no window of its own: this ends it
-$('quitBtn').addEventListener('click', async () => {
-  try {
-    await api('/api/quit');
-    document.body.replaceChildren(el('main', {}, el('h1', { class: 'launch-h' }, 'Meet Recorder has stopped.'), el('p', { class: 'lede' }, 'Open the Meet Recorder app to start it again. You can close this tab.')));
-  } catch (e) {
-    alert(e.message);
-  }
-});
-
-// "Open folder" in the words of this computer
-const SHOW_IN = /Mac/.test(navigator.platform || navigator.userAgent) ? 'Show in Finder' : /Win/.test(navigator.platform || navigator.userAgent) ? 'Show in File Explorer' : 'Open folder';
-function nameFolderButtons(root = document) {
-  root.querySelectorAll('.act-open, [data-open-folder]').forEach((b) => (b.textContent = SHOW_IN));
-}
-
-// what the browser's share picker will ask, in its own words for this computer
-function callHelp(failed) {
-  const mac = /Mac/.test(navigator.platform || navigator.userAgent);
-  const how = mac
-    ? 'choose the tab your meeting is in and keep "Also share tab audio" on'
-    : 'choose "Entire screen" and switch on "Also share system audio"';
-  return failed
-    ? `The call's sound wasn't shared, so recording didn't start. Press Record again, then ${how}.`
-    : `When the browser asks what to share, ${how}.`;
-}
-function localHint() {
-  $('localHint').textContent = $('localCall').checked ? callHelp(false) : 'Your browser will ask to use the microphone.';
-}
+// ---------- start ----------
 try {
-  const call = localStorage.getItem('mrb.localCall');
+  const call = localStorage.getItem('echo.call');
   if (call !== null) $('localCall').checked = call === '1';
+  const name = localStorage.getItem('echo.name');
+  if (name) $('name').value = name;
+  mode = localStorage.getItem('echo.mode') || 'local';
 } catch {}
-localHint();
-$('localCall').addEventListener('change', () => {
-  localHint();
-  try { localStorage.setItem('mrb.localCall', $('localCall').checked ? '1' : '0'); } catch {}
-});
-
-try {
-  const remembered = localStorage.getItem('mrb.name');
-  if (remembered) $('name').value = remembered;
-  $('name').addEventListener('change', () => {
-    try { localStorage.setItem('mrb.name', $('name').value); } catch {}
-  });
-} catch {}
-
+$('localCall').dispatchEvent(new Event('change'));
+setMode(mode);
+if (!location.hash || location.hash === '#transcribe') history.replaceState(null, '', '#record');
 connect();
-loadRecordings().then(() => showTx(tx));
+loadRecordings().then(() => {
+  route();
+  showTx(tx);
+});
 loadWhisper();
 requestAnimationFrame(frame);

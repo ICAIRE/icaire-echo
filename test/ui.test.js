@@ -27,7 +27,7 @@ function raw(method, p, { headers = {}, body } = {}) {
   });
 }
 
-test('control panel: join, live stats, stop, files, captions, Whisper merge, and API guards', async (t) => {
+test('control panel: join, live stats, end, the recording page, captions, Whisper merge, and API guards', async (t) => {
   const outRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mrb-ui-out-'));
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'mrb-ui-prof-'));
   const server = createServer({
@@ -56,16 +56,20 @@ test('control panel: join, live stats, stop, files, captions, Whisper merge, and
 
     await t.test('bad link shows an inline error', async () => {
       await page.goto(BASE);
+      assert.equal(await page.title(), 'ICAIRE Echo');
+      await page.click('.mode [data-mode="bot"]');
       await page.fill('#url', 'not a meet link');
-      await page.click('.btn-join');
-      await page.waitForFunction(() => document.querySelector('#joinError').textContent.length > 0);
-      assert.match(await page.textContent('#joinError'), /Google Meet link|valid link/);
+      await page.click('#bigBtn');
+      await page.waitForFunction(() => document.querySelector('#startError').textContent.length > 0);
+      assert.match(await page.textContent('#startError'), /Google Meet link|valid link/);
     });
 
     await t.test('join -> waiting -> recording with live data', async () => {
       await page.fill('#url', 'meet.google.com/abc-defg-hij'); // no https:// on purpose
-      await page.click('.btn-join');
-      await page.waitForSelector('#live:not([hidden])');
+      await page.fill('#newTitle', 'Weekly sync');
+      await page.click('#bigBtn');
+      await page.waitForSelector('#viewLive:not([hidden])');
+      assert.equal(await page.textContent('#pillTitle'), 'Weekly sync');
       await page.waitForFunction(() => document.body.dataset.status === 'recording', null, { timeout: 30000 });
 
       const dup = await raw('POST', '/api/join', { headers: { 'x-mrb': '1', 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://meet.google.com/abc-defg-hij' }) });
@@ -78,26 +82,29 @@ test('control panel: join, live stats, stop, files, captions, Whisper merge, and
 
       await page.waitForFunction(() => document.querySelectorAll('.person').length >= 2, null, { timeout: 15000 });
       await page.waitForSelector('.person.speaking', { timeout: 15000 });
+      await page.click('.live-tabs [data-live="view"]');
       await page.waitForSelector('#preview:not([hidden])', { timeout: 10000 });
+      await page.click('.live-tabs [data-live="people"]');
       const names = await page.$$eval('.person-name', (els) => els.map((e) => e.textContent));
       assert.ok(names.includes('Alice') && names.includes('Bob'), names.join(','));
       assert.ok(!names.includes('Recorder'), 'bot is not listed as a person');
       const lanesH = await page.$eval('#lanes', (c) => c.clientHeight);
       assert.ok(lanesH > 60, 'timeline canvas drawn, height ' + lanesH);
       const statsText = await page.textContent('#stats');
-      assert.match(statsText, /Video written/);
-      await page.waitForFunction(() => parseFloat(document.querySelector('#stats .stat dd')?.textContent) > 0, null, { timeout: 10000 }); // video bytes flowing
+      assert.match(statsText, /Sound written/);
+      await page.waitForFunction(() => parseFloat(document.querySelector('#stats dd')?.textContent) > 0, null, { timeout: 10000 }); // sound bytes flowing
       await page.screenshot({ path: path.join(__dirname, 'out', 'ui-live.png') });
     });
 
-    await t.test('stop -> processing -> done summary + recordings list', async () => {
+    await t.test('stop -> processing -> the recording opens, titled, with its files', async () => {
       await page.waitForTimeout(4000);
       await page.click('#stopBtn');
-      await page.waitForFunction(() => document.body.dataset.status === 'done', null, { timeout: 60000 });
-      assert.match(await page.textContent('#doneSub'), /recorded/);
-      await page.waitForSelector('.rec-item');
-      const files = await page.$$eval('.rec-item .rec-files a', (as) => as.map((a) => a.textContent));
-      for (const f of ['video.mp4', 'audio.wav', 'speakers.csv', 'speakers.srt']) assert.ok(files.includes(f), files.join(','));
+      await page.waitForSelector('#viewRec:not([hidden])', { timeout: 60000 });
+      assert.equal(await page.textContent('#recTitle'), 'Weekly sync');
+      await page.waitForSelector('.wave-card.selected');
+      const files = await page.$$eval('#exportOptions a', (as) => as.map((a) => a.getAttribute('download')));
+      for (const f of ['video.mp4', 'audio.wav', 'speakers.csv']) assert.ok(files.includes(f), files.join(','));
+      await page.waitForSelector('.wave-card.selected .wave-graphic rect', { timeout: 10000 });
       await page.screenshot({ path: path.join(__dirname, 'out', 'ui-done.png'), fullPage: true });
     });
 
@@ -111,8 +118,8 @@ test('control panel: join, live stats, stop, files, captions, Whisper merge, and
       assert.match(vtt.body, /^WEBVTT/);
       assert.match(vtt.body, /\d\d:\d\d:\d\d\.\d{3} --> \d\d:\d\d:\d\d\.\d{3}\n(Alice|Bob)/);
 
-      await page.click('.act-watch');
-      const meta = await page.$eval('.rec-player video', (v) =>
+      await page.click('#recWatch');
+      const meta = await page.$eval('#videoBox video', (v) =>
         new Promise((res) => (v.readyState >= 1 ? res() : v.addEventListener('loadedmetadata', res, { once: true }))).then(() => ({ d: v.duration, w: v.videoWidth, cues: v.textTracks.length }))
       );
       assert.ok(meta.d > 3 && meta.w > 0 && meta.cues === 1, JSON.stringify(meta));
@@ -126,8 +133,10 @@ test('control panel: join, live stats, stop, files, captions, Whisper merge, and
       };
       const wf = path.join(os.tmpdir(), 'mrb-whisper.json');
       fs.writeFileSync(wf, JSON.stringify(whisper));
-      await page.setInputFiles('.act-merge input', wf);
-      await page.waitForFunction(() => /turns/.test(document.querySelector('.rec-transcript')?.textContent || ''), null, { timeout: 15000 });
+      await page.setInputFiles('#mergePick input', wf);
+      await page.waitForFunction(() => /turns/.test(document.querySelector('#txMeta')?.textContent || ''), null, { timeout: 15000 });
+      assert.ok((await page.$$('#txLines .tx-line')).length > 0, 'transcript lines shown');
+      assert.ok((await page.$$('#timeline .timeline-row')).length >= 2, 'who spoke when, one row per speaker');
       const txt = fs.readFileSync(path.join(outRoot, id, 'transcript.txt'), 'utf8');
       for (const line of txt.trim().split('\n')) {
         const m = /\] (.+?)(?: \(over: [^)]*\))?: line \d+ from (.+)$/.exec(line);

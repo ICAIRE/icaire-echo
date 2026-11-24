@@ -1,43 +1,40 @@
 # Design
 
-Meet Recorder looks like an ICAIRE tool: ICAIRE's colours, type and flat surfaces, composed as a quiet
-working page, not as a page of icaire.org. Every colour comes from `ui/tokens.css` (ICAIRE's design
-tokens, copied as they are); `ui/style.css` names no hex value.
+ICAIRE Echo is an ICAIRE studio tool: ICAIRE's colours (Midnight, Lime, Gold) on one dark, flat room. It shares
+the three-column frame of ICAIRE's studio apps, with a look of its own so it is never mistaken for ICAIRE
+Voice: solid surfaces instead of a glowing backdrop, a round record button inside "echo" rings, lime edges
+to mark what is open.
 
-## The idea
+## The frame
 
-A calm desk with one obvious thing to do. White page, soft Raised panels, hairline borders, no
-shadows, generous space, large light headings. One big action per view: the round **Record** key on
-the start screen, **Create voice-over** on the Voice-over tab, **Copy transcript** once a transcript
-exists.
+| Column | What it holds |
+|---|---|
+| Top bar | The Echo mark and name, the two sections (Record, Voice-overs), the live recording pill, More |
+| Left | Details for what is in the middle: recording setup, an open recording's details and people, or the voice and its settings |
+| Middle | The work: start a recording, the live recording, one recording with its transcript and player, the voice-over script, models and storage |
+| Right | The list: previous recordings with their waveforms (coloured by speaker), or the voice-overs made |
+| Status bar | Whether the transcriber is ready, and that everything is saved on this computer |
 
-The one heavy moment is the live recording: a Midnight panel with the clock, **Stop & save** in Lime,
-and the sound running in Lime. Nothing else on the page is dark.
+The page fits the screen (100vh); each column scrolls on its own. Tablets put the details and the list in
+one left column; phones stack everything.
 
 ## Rules
 
 | | |
 |---|---|
-| Surfaces | Canvas (`--surface-page`) and Raised (`--surface-raised`); Midnight only for the live panel |
-| Borders | `--border-subtle` hairlines; `--border-strong` on hover and for inputs |
-| Shadows | none. Focus rings are the only glow |
-| Radius | `--radius-lg` panels and cards, `--radius-md` buttons and inputs, `--radius-pill` tabs and chips |
-| Primary button | Deep Forest with white text, one per view; on Midnight, Lime with Midnight text |
-| Quiet button | transparent with a `--border-strong` outline; Forest on hover |
-| Lime | graphic only: dots, the sound, "Recommended", changed-setting marks. Never text on white |
-| Gold | the "busy" lamp (joining, processing) and warnings on Midnight |
-| Red (`--state-danger`) | the Record dot, the recording lamp, errors |
-| Speaker colours | a categorical palette in `ui/app.js` (data, not brand), the same for a person everywhere |
-| Type | ICAIRE's stack (Calibri, Carlito, then the system font); headings 300 weight at display size; tabular figures for every time and number |
-| Direction | logical properties (`margin-inline-start`, `border-block-end`) so the page can mirror |
-| Dark | follows the computer's setting through ICAIRE's dark tokens (`html[data-theme="dark"]`) |
-
-## Identity
-
-The UNESCO | ICAIRE lockup, small (2.5rem high), at the start of the top strip, next to the product
-name. The white lockup in dark mode. Nowhere else.
+| Surfaces | Solid steps of Midnight: room `--room`, bars `--bar`, side columns `--side`, cards `--card`. No white pages, no see-through panels |
+| Depth | None. No shadows, no 3D, no blur, no glow, nothing tilted. Borders (`--edge`) and tints only |
+| Selected | A lime edge (`border-inline-start`) or a lime outline, never a glow |
+| Record button | A dark circle with a lime ring and microphone, in thin rings that ripple outward (off with reduced motion) |
+| Live | The live button is the same circle; red rings ripple while it records, gold when paused |
+| Primary button | Lime with Midnight text, one per view |
+| Danger | Red, only for End and Delete |
+| Speaker colours | One palette (`WAVE` in `ui/app.js`), the same order in the list, the timeline and the transcript |
+| Cards | Cards of one kind are one size |
+| Icons | Lucide (ISC), two-tone: the accent part in lime (`ui/icons.js`) |
+| Type | The system font; tabular figures for every time and number |
+| Direction | Logical properties where it matters, so the page can mirror |
 
 ## Inspiration, not a copy
 
-The calm, the space and the single obvious action are in the spirit of voice tools like Wispr Flow.
-Its layout, its floating bar, its colours and its type are not used.
+The frame follows ICAIRE Voice (the studio layout: details, work, list). The look is Echo's own.

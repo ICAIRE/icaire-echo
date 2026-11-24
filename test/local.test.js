@@ -118,30 +118,31 @@ test('record here with the call: microphone and the shared call sound land in on
     await panel.goto(BASE + '/');
     assert.equal(await panel.isChecked('#localCall'), true, 'on by default');
     assert.match(await panel.textContent('#localHint'), /share/);
-    await panel.click('#localBtn');
-    await panel.waitForSelector('#live:not([hidden])', { timeout: 15000 });
-    assert.match(await panel.textContent('#pill'), /you and the call/);
-    assert.match(await panel.textContent('#statusSub'), /sound of your call/);
+    await panel.click('#bigBtn');
+    await panel.waitForSelector('#viewLive:not([hidden])', { timeout: 15000 });
+    assert.match(await panel.textContent('#captureStatus'), /Call sound on/);
+    assert.equal(await panel.textContent('#liveLabel'), 'Recording');
     await panel.waitForTimeout(4000);
     // the browser's own 'Stop sharing' button: recording carries on with the microphone and says so
     await panel.evaluate(() => window.__shared.getAudioTracks()[0].dispatchEvent(new Event('ended')));
-    await panel.waitForFunction(() => /only your microphone/.test(document.getElementById('statusSub').textContent));
+    await panel.waitForFunction(() => /only your microphone/.test(document.getElementById('liveSub').textContent));
     await panel.waitForTimeout(1000);
     // pause: the clock stands still and nothing is recorded; resume carries on in the same recording
     const wallStart = Date.now();
-    await panel.click('#pauseBtn');
-    assert.equal(await panel.textContent('#statusTitle'), 'Paused');
-    assert.equal(await panel.textContent('#pauseBtn'), 'Resume');
+    await panel.click('#captureBtn');
+    assert.equal(await panel.textContent('#liveLabel'), 'Paused');
+    assert.equal(await panel.textContent('#captureLabel'), 'Tap to continue');
+    assert.match(await panel.textContent('#pillState'), /Paused/);
     const clockAtPause = await panel.textContent('#clock');
     await panel.waitForTimeout(3000);
     assert.equal(await panel.textContent('#clock'), clockAtPause, 'the clock stands still while paused');
-    await panel.click('#pauseBtn');
-    assert.equal(await panel.textContent('#pauseBtn'), 'Pause');
+    await panel.click('#captureBtn');
+    assert.equal(await panel.textContent('#captureLabel'), 'Tap to pause');
     await panel.waitForTimeout(1500);
     const pausedWall = (Date.now() - wallStart) / 1000;
     await panel.click('#stopBtn');
-    await panel.waitForSelector('#done:not([hidden])', { timeout: 30000 });
-    assert.match(await panel.textContent('#done'), /microphone and the call/);
+    await panel.waitForSelector('#viewRec:not([hidden])', { timeout: 30000 });
+    assert.match(await panel.textContent('#recFacts'), /microphone and call sound/);
 
     const id = fs.readdirSync(outRoot).find((d) => /^\d{4}-/.test(d));
     const meta = JSON.parse(fs.readFileSync(path.join(outRoot, id, 'meta.json'), 'utf8'));

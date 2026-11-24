@@ -34,16 +34,18 @@ test('transcribe from the panel: progress bar, speaker-labeled transcript, copy 
 
   try {
     await page.goto(BASE);
-    await page.waitForFunction(() => document.querySelector('#whisperInfo').dataset.state === 'ready', null, { timeout: 60000 });
-    const badge = await page.textContent('#whisperInfo');
+    await page.waitForFunction(() => document.querySelector('#engine').dataset.state === 'ready', null, { timeout: 60000 });
+    const badge = await page.textContent('#engine');
+    await page.click('.wave-card');
+    await page.waitForSelector('#viewRec:not([hidden])');
     assert.match(badge, new RegExp(w.models[0].name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), badge);
 
     await t.test('cancel stops a running transcription', async () => {
-      await page.click('.act-transcribe');
-      await page.waitForSelector('.tx-progress:not([hidden])');
-      await page.click('.tx-cancel');
-      await page.waitForSelector('.tx-progress', { state: 'hidden', timeout: 15000 });
-      await page.waitForFunction(() => !document.querySelector('.act-transcribe').disabled, null, { timeout: 10000 });
+      await page.click('#transcribeBtn');
+      await page.waitForSelector('#txProg:not([hidden])');
+      await page.click('#txCancel');
+      await page.waitForSelector('#txProg', { state: 'hidden', timeout: 15000 });
+      await page.waitForFunction(() => !document.querySelector('#transcribeBtn').disabled, null, { timeout: 10000 });
       assert.ok(!fs.existsSync(path.join(outRoot, id, 'transcript.txt')));
     });
 
@@ -51,11 +53,11 @@ test('transcribe from the panel: progress bar, speaker-labeled transcript, copy 
       const seen = [];
       await page.exposeFunction('__pct', (p) => seen.push(p));
       await page.evaluate(() => {
-        new MutationObserver(() => window.__pct(document.querySelector('.tx-pct')?.textContent || '')).observe(document.querySelector('#recList'), { subtree: true, characterData: true, childList: true });
+        new MutationObserver(() => window.__pct(document.querySelector('#txPct')?.textContent || '')).observe(document.querySelector('#txProg'), { subtree: true, characterData: true, childList: true });
       });
-      await page.click('.act-transcribe');
-      await page.waitForSelector('.tx-progress:not([hidden])');
-      await page.waitForSelector('.rec-transcript:not([hidden])', { timeout: 180000 });
+      await page.click('#transcribeBtn');
+      await page.waitForSelector('#txProg:not([hidden])');
+      await page.waitForSelector('#txLines .tx-line', { timeout: 180000 });
       await page.screenshot({ path: path.join(__dirname, 'out', 'ui-transcript.png') });
       const pcts = seen.map((s) => parseInt(s, 10)).filter(Number.isFinite);
       assert.ok(pcts.some((p) => p > 0 && p < 100), 'saw an in-between percentage: ' + seen.join(' '));
@@ -79,13 +81,14 @@ test('transcribe from the panel: progress bar, speaker-labeled transcript, copy 
       const totalWords = SCRIPT.reduce((n, u) => n + words(u.text).length, 0);
       const misplaced = SCRIPT.reduce((n, u) => n + words(u.text).filter((x) => !said[u.speaker].includes(x)).length, 0);
       t.diagnostic(`speaker accuracy: ${totalWords - misplaced}/${totalWords} words`);
-      assert.match(await page.textContent('.tx-meta'), /2 speakers/);
-      assert.equal(await page.textContent('.act-transcribe'), 'Transcribe again');
+      assert.match(await page.textContent('#txMeta'), /2 speakers/);
+      assert.match(await page.textContent('#retranscribe'), /Transcribe again/);
+      assert.match(await page.textContent('.wave-card'), /Transcribed/);
     });
 
     await t.test('copy puts the whole transcript on the clipboard', async () => {
-      await page.click('.tx-copy');
-      await page.waitForFunction(() => /Copied/.test(document.querySelector('.tx-copy').textContent));
+      await page.click('#copyAll');
+      await page.waitForFunction(() => /copied/i.test(document.querySelector('#toast').textContent));
       const clip = await page.evaluate(() => navigator.clipboard.readText());
       // Windows stores clipboard text with CRLF line ends.
       assert.equal(clip.replace(/\r\n/g, '\n'), fs.readFileSync(path.join(outRoot, id, 'transcript.txt'), 'utf8'));

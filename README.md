@@ -51,8 +51,9 @@ one; the whole transcript follows.
 
 **Make a voice-over.** Open **Voice-over**, paste your script, choose a voice and press **Create
 voice-over**. Each line of the script is read in one go, and an empty line makes a longer pause.
-**Presenter** is the narrator of the Ideas City presentation with the same settings. **Layla** and
-**Omar** sound like radio hosts. **Advanced settings** shows everything else.
+Voices go by Kokoro's own names (Heart, Bella, Fenrir…), the clearest first, with a menu for the
+language and a search. **Pacing** sets how the voice reads: **Calm narrator** (the Ideas City
+presentation's settings), **Quick radio host** or **Easy-going radio host**. **Settings** shows everything else.
 
 ## Your files
 
