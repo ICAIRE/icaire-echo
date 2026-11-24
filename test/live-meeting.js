@@ -37,6 +37,9 @@ const SPEAKERS = [
   { key: 'Naayf', voice: MAC ? 'Majed' : 'Naayf' },
 ].slice(0, N);
 const LOBBY = args.includes('--lobby');
+// --url: join a meeting someone else started (they let everyone in); --guests: every speaker joins as a guest
+const GIVEN_URL = opt('--url', null);
+const ALL_GUESTS = args.includes('--guests') || !!GIVEN_URL;
 const ADMIT_AFTER = Number(opt('--admit-after', 40)) * 1000;
 
 // gap = seconds after the previous line ENDS (negative: starts before it ends, i.e. interrupts / overlaps).
@@ -95,7 +98,8 @@ function copyProfile(i) {
   const dst = path.join(OUT, 'profiles', 'speaker' + i);
   fs.rmSync(dst, { recursive: true, force: true });
   const skip = /(^|[\\/])(Cache|Code Cache|GPUCache|GrShaderCache|ShaderCache|GraphiteDawnCache|DawnCache|Service Worker[\\/]CacheStorage|component_crx_cache|optimization_guide_model_store|OnDeviceHeadSuggestModel|Crashpad|BrowserMetrics.*|Singleton\w*|lockfile)$/i;
-  fs.cpSync(PROFILE, dst, { recursive: true, filter: (src) => !skip.test(path.relative(PROFILE, src)) });
+  const from = fs.realpathSync(PROFILE); // the profile folder can be a link to where the app keeps it
+  fs.cpSync(from, dst, { recursive: true, filter: (src) => !skip.test(path.relative(from, src)) });
   return dst;
 }
 
@@ -409,7 +413,7 @@ else if (require.main === module) (async () => {
   const speakers = [];
   for (let i = 0; i < SPEAKERS.length; i++) {
     // with --lobby, the last speaker is a guest who has to be let in
-    const guest = LOBBY && i === SPEAKERS.length - 1 && i > 0;
+    const guest = ALL_GUESTS || (LOBBY && i === SPEAKERS.length - 1 && i > 0);
     const profile = guest ? fs.mkdtempSync(path.join(require('os').tmpdir(), 'echo-guest-')) : copyProfile(i);
     speakers.push(Object.assign(await openSpeaker(i, profile), { guest, name: SPEAKERS[i].key }));
   }
@@ -426,8 +430,8 @@ else if (require.main === module) (async () => {
   try {
     // speaker 1 creates the meeting
     const host = speakers[0];
-    host.page.goto('https://meet.google.com/new', { waitUntil: 'commit', timeout: 60000 }).catch(() => {});
-    let url = null;
+    let url = GIVEN_URL;
+    if (!url) host.page.goto('https://meet.google.com/new', { waitUntil: 'commit', timeout: 60000 }).catch(() => {});
     for (let n = 0; n < 60 && !url; n++) {
       await sleep(1000);
       const m = /meet\.google\.com\/([a-z]{3}-[a-z]{4}-[a-z]{3})/.exec(host.page.url());
@@ -437,9 +441,14 @@ else if (require.main === module) (async () => {
     if (!url) throw new Error('Could not start a new meeting (page: ' + host.page.url() + ')');
     log('New meeting: ' + url);
     fs.writeFileSync(path.join(OUT, 'meeting.txt'), url);
-    await joinCall(host, url);
-    stopAdmitting = admitLoop(host);
-    await Promise.all(speakers.slice(1).map((sp) => joinCall(sp, url)));
+    if (GIVEN_URL) {
+      log('Everyone asks to join; the host of the meeting lets them in.');
+      await Promise.all(speakers.map((sp) => joinCall(sp, url)));
+    } else {
+      await joinCall(host, url);
+      stopAdmitting = admitLoop(host);
+      await Promise.all(speakers.slice(1).map((sp) => joinCall(sp, url)));
+    }
 
     // load clips into each speaker
     for (const c of clips) {

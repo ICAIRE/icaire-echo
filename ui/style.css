@@ -695,3 +695,56 @@ body:not([data-mode='bot']) .meet-link { visibility: hidden; }
 }
 .voice-tools { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 6px; }
 .voice-tools select { width: 100%; font-size: 12px; min-height: 36px; padding: 6px 8px; background: var(--field); border-color: var(--field-line); }
+
+/* ---------- the home page always fits the window: nothing to scroll ---------- */
+@media (min-width: 701px) {
+  #app[data-view='home'] #main { overflow: hidden; display: flex; flex-direction: column; }
+  #viewHome { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; width: 100%; }
+  #viewHome .home-focus { padding: 0; }
+  #viewHome .home-focus h1 { font-size: clamp(24px, 4.2vh, 38px); margin-bottom: 6px; }
+  #viewHome .mode { margin-top: clamp(10px, 2.2vh, 22px); }
+  #viewHome .meet-link { margin-top: clamp(8px, 1.4vh, 14px); }
+  /* the button and its rings grow and shrink with the window's height */
+  #viewHome .mic-surround { width: clamp(150px, 30vh, 270px); height: clamp(150px, 30vh, 270px); margin: clamp(2px, 1vh, 8px) 0; }
+  #viewHome .mic-surround .still.b { inset: 10%; }
+  #viewHome .mic-surround .still.a { inset: 23%; }
+  #viewHome .hero-mic { width: 56%; height: 56%; }
+  #viewHome .hero-mic svg.i { width: 46%; height: 46%; }
+  #viewHome .readiness { margin-top: clamp(6px, 1.4vh, 14px); min-height: 0; }
+  /* a notice floats over the top of the page instead of pushing it down */
+  #viewHome .notice { position: absolute; top: 0; left: 50%; translate: -50% 0; width: min(680px, 100%); z-index: 5; background: #3a3021; }
+}
+
+/* ---------- every page fits the window; long lists scroll inside their own box ---------- */
+@media (min-width: 701px) {
+  #main { overflow: hidden; display: flex; flex-direction: column; }
+  #main > .view:not([hidden]) { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; }
+  #main > .view > * { flex-shrink: 0; }
+  #viewSettings { overflow: auto; }
+  /* a recording: the transcript lines scroll, everything else stays put */
+  #viewRec .meeting-view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding-bottom: 0; }
+  #viewRec .meeting-view > * { flex-shrink: 0; }
+  #viewRec .transcript { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  #viewRec .transcript > * { flex-shrink: 0; }
+  #txBox:not([hidden]) { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  #txBox > * { flex-shrink: 0; }
+  #txLines { flex: 1 1 auto; min-height: 80px; overflow: auto; scrollbar-width: thin; }
+  #viewRec .video-box video { max-height: 30vh; }
+  #viewRec .audio-player { position: static; margin: 0 -24px; }
+  /* voice-overs: the script takes the space there is */
+  #viewVoice .script-card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+  #viewVoice .script-card > * { flex-shrink: 0; }
+  #voText { flex: 1 1 auto; min-height: 140px; height: auto; }
+  /* live: the button scales with the window, the bot's card takes the rest */
+  #viewLive .recording-heading { margin-bottom: clamp(8px, 1.6vh, 18px); }
+  #viewLive .recording-focus { padding: clamp(12px, 2vh, 22px) 20px; }
+  #viewLive .capture-surround { width: clamp(190px, 30vh, 300px); height: clamp(190px, 30vh, 300px); margin: -10px 0; }
+  #viewLive .capture-button { width: 72%; height: 72%; gap: clamp(4px, 1vh, 13px); }
+  #viewLive .capture-wave { height: clamp(30px, 5.5vh, 64px); }
+  #viewLive .capture-time { font-size: clamp(22px, 3.4vh, 32px); }
+  #viewLive .recording-controls { margin-top: clamp(8px, 1.6vh, 20px); }
+  #viewLive .meter { margin-top: clamp(10px, 2vh, 24px); }
+  #viewLive .live-card { flex: 1 1 auto; min-height: 120px; display: flex; flex-direction: column; margin-top: clamp(10px, 1.6vh, 20px); }
+  #viewLive .live-tabs { flex-shrink: 0; }
+  #viewLive .live-pane:not([hidden]) { flex: 1 1 auto; min-height: 0; overflow: auto; }
+}
