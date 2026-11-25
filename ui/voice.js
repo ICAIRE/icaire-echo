@@ -19,6 +19,13 @@ window.voiceShown = () => {
   if (!VO.info) loadVoice();
 };
 
+window.voiceHidden = () => {
+  sampleRequest++;
+  VO.audio?.pause();
+  playing?.pause();
+  closeTags();
+};
+
 // ---------- settings ----------
 const get = (o, k) => k.split('.').reduce((a, p) => (a == null ? a : a[p]), o);
 function nest(flat) {
@@ -83,11 +90,12 @@ async function playSample(btn, body, endpoint) {
     const r = await api(endpoint, body);
     if (request !== sampleRequest || !btn.isConnected) return;
     if (!VO.audio) VO.audio = new Audio();
+    playing?.pause();
     VO.audio.src = r.url;
     VO.audio.onended = VO.audio.onpause = () => { delete btn.dataset.playing; btn.setAttribute('aria-label', btn.dataset.label); };
     await VO.audio.play();
     btn.dataset.playing = '';
-    btn.setAttribute('aria-label', 'Stop the sample');
+    btn.setAttribute('aria-label', 'Pause the sample');
   } catch (e) {
     $('voError').textContent = e.message;
   } finally {
@@ -99,7 +107,7 @@ async function playSample(btn, body, endpoint) {
 let sampleRequest = 0;
 function playButton(label, body, endpoint = '/api/voice/sample') {
   const b = el('button', { class: 'play', type: 'button', 'aria-label': label, 'data-label': label, title: label });
-  b.append(el('span', { class: 'play-icon', 'aria-hidden': 'true' }));
+  b.append(icon('play'), icon('pause'));
   b.addEventListener('click', (e) => {
     e.stopPropagation();
     playSample(b, body(), endpoint);
@@ -112,7 +120,7 @@ function voiceRow({ on, name, tag, about, sample, pick, key, endpoint }) {
   const row = el('li', { class: 'voice-row' + (on ? ' on' : ''), role: 'radio', title: name + ' · ' + about, 'aria-checked': String(on), tabindex: on ? '0' : '-1', 'data-key': key });
   row.append(
     icon('waves'),
-    el('span', { class: 'voice-text' }, el('span', { class: 'voice-name' }, name, tag ? el('span', { class: 'voice-tag', title: tag, 'aria-label': tag }, icon('check')) : null), el('span', { class: 'voice-about' }, about)),
+    el('span', { class: 'voice-text' }, el('span', { class: 'voice-name' }, el('bdi', {}, name), tag ? el('span', { class: 'voice-tag', title: tag, 'aria-label': tag }, icon('check')) : null), el('span', { class: 'voice-about' }, about)),
     ...(sample ? [playButton('Play a sample of ' + name, sample, endpoint)] : [])
   );
   row.addEventListener('click', pick);
@@ -153,6 +161,7 @@ function renderVoiceList() {
       pick: () => {
         delete VO.changes.lang;
         setVal('voice', v.id);
+        $('voVoices').querySelector('.on')?.focus({ preventScroll: true });
       },
     }));
   }
@@ -280,7 +289,7 @@ function control([k, label, kind, o]) {
     if (target) target.disabled = true;
   }
   row.append(el('label', { for: id }, label), input);
-  const reset = el('button', { class: 'reset', type: 'button', title: `Back to ${fmtNum(base(k), o)}`, 'aria-label': `Reset ${label}` }, '↺');
+  const reset = el('button', { class: 'reset', type: 'button', title: `Back to ${fmtNum(base(k), o)}`, 'aria-label': `Reset ${label}` }, icon('refresh'));
   reset.hidden = !changed;
   reset.addEventListener('click', () => setVal(k, base(k)));
   row.append(reset);
@@ -297,7 +306,7 @@ function pronEditor() {
     const rows = val(k) || [];
     const changed = k in VO.changes;
     const t = el('div', { class: 'pron-list' + (changed ? ' changed' : '') });
-    t.append(el('div', { class: 'pron-title' }, title, changed ? el('button', { class: 'reset', type: 'button', 'aria-label': 'Reset ' + title, onclick: () => setVal(k, base(k)) }, '↺') : null));
+    t.append(el('div', { class: 'pron-title' }, title, changed ? el('button', { class: 'reset', type: 'button', 'aria-label': 'Reset ' + title, onclick: () => setVal(k, base(k)) }, icon('refresh')) : null));
     const grid = el('div', { class: 'pron-grid', style: `--cols:${n}` }, ...heads.map((h) => el('span', { class: 'pron-h' }, h)), el('span'));
     rows.forEach((r, i) => {
       for (let c = 0; c < n; c++) {
@@ -309,7 +318,7 @@ function pronEditor() {
         });
         grid.append(inp);
       }
-      grid.append(el('button', { class: 'reset', type: 'button', 'aria-label': 'Remove', onclick: () => setVal(k, rows.filter((_, j) => j !== i)) }, '×'));
+      grid.append(el('button', { class: 'reset', type: 'button', 'aria-label': 'Remove', onclick: () => setVal(k, rows.filter((_, j) => j !== i)) }, icon('close')));
     });
     t.append(grid, el('button', { class: 'small', type: 'button', onclick: () => setVal(k, [...rows.map((x) => [...x]), Array(n).fill('')]) }, 'Add one'));
     box.append(t);
@@ -450,6 +459,7 @@ function renderSetup(setup) {
   prog.hidden = !setup || setup.status !== 'running';
   if (setup && setup.status === 'running') {
     const [g, gu] = bytes(setup.got);
+    $('voSetupBar').parentElement.setAttribute('aria-valuenow', Math.floor(setup.percent));
     $('voSetupPct').textContent = Math.floor(setup.percent) + '%';
     $('voSetupLabel').textContent = `Downloading the voices: ${g} ${gu} of ${n} ${u}`;
     $('voSetupBar').style.transform = `scaleX(${(setup.percent / 100).toFixed(4)})`;
@@ -468,7 +478,8 @@ function renderJob(j) {
     const phase = j.status === 'loading' ? 'Starting the voice…'
       : j.status === 'encoding' ? 'Saving the file…' : `Reading line ${j.done} of ${j.total}`;
     $('voLabel').textContent = phase + (j.etaSec != null ? ` · about ${mmss(j.etaSec)} left` : '');
-    $('voBar').parentElement.setAttribute('aria-valuenow', Math.floor(j.percent || 0));
+    if (j.status === 'loading') $('voBar').parentElement.removeAttribute('aria-valuenow');
+    else $('voBar').parentElement.setAttribute('aria-valuenow', Math.floor(j.percent || 0));
     $('voBar').style.transform = j.status === 'loading' ? '' : `scaleX(${(j.percent / 100).toFixed(4)})`;
     prog.dataset.phase = j.status;
   }
@@ -599,7 +610,7 @@ function meterPlayer(url, duration) {
   const audio = new Audio();
   audio.preload = 'none';
   audio.src = url;
-  const btn = el('button', { class: 'play', type: 'button', 'aria-label': 'Play' }, el('span', { class: 'play-icon', 'aria-hidden': 'true' }));
+  const btn = el('button', { class: 'play', type: 'button', 'aria-label': 'Play' }, icon('play'), icon('pause'));
   const canvas = el('canvas', { class: 'meter-canvas', tabindex: '0', role: 'slider', 'aria-label': 'Position', 'aria-valuemin': '0', 'aria-valuemax': String(Math.round(duration)), 'aria-valuenow': '0' });
   const time = el('span', { class: 'meter-time' }, `0:00 / ${mmss(duration)}`);
   const box = el('div', { class: 'meter-player' }, btn, el('div', { class: 'meter-window' }, canvas), time);
@@ -620,8 +631,8 @@ function meterPlayer(url, duration) {
     const W = canvas.clientWidth;
     const H = canvas.clientHeight;
     if (!W) return;
-    canvas.width = Math.round(W * dpr);
-    canvas.height = Math.round(H * dpr);
+    if (canvas.width !== Math.round(W * dpr)) canvas.width = Math.round(W * dpr);
+    if (canvas.height !== Math.round(H * dpr)) canvas.height = Math.round(H * dpr);
     const c = canvas.getContext('2d');
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.clearRect(0, 0, W, H);
@@ -645,7 +656,6 @@ function meterPlayer(url, duration) {
     time.textContent = `${mmss(audio.currentTime)} / ${mmss(duration)}`;
     canvas.setAttribute('aria-valuenow', String(Math.round(audio.currentTime)));
     draw();
-    if (!audio.paused) requestAnimationFrame(tick);
   };
   const setIcon = () => {
     btn.toggleAttribute('data-playing', !audio.paused);
@@ -661,7 +671,8 @@ function meterPlayer(url, duration) {
       audio.play().catch(() => {});
     } else audio.pause();
   });
-  audio.addEventListener('play', () => (setIcon(), requestAnimationFrame(tick)));
+  audio.addEventListener('play', setIcon);
+  audio.addEventListener('timeupdate', tick);
   audio.addEventListener('pause', setIcon);
   audio.addEventListener('ended', () => (setIcon(), tick()));
   const seekTo = (sec) => {
@@ -736,9 +747,11 @@ function highlightTake() {
 // ---------- start ----------
 async function loadVoice() {
   try {
-    VO.info = await fetch('/api/voice').then((r) => r.json());
+    const response = await fetch('/api/voice');
+    if (!response.ok) throw new Error();
+    VO.info = await response.json();
   } catch {
-    $('voError').textContent = 'Could not reach the voice engine.';
+    $('voError').replaceChildren('Could not load voices. ', el('button', { type: 'button', class: 'small', onclick: loadVoice }, 'Try again'));
     return;
   }
   try {
@@ -751,6 +764,7 @@ async function loadVoice() {
       if (s.text && !$('voText').value) $('voText').value = s.text;
     }
   } catch {}
+  $('voError').replaceChildren();
   renderSetup(null);
   renderAll();
   loadVoiceovers(VO.job?.status === 'done' && VO.job.id);
@@ -808,21 +822,21 @@ $('voSetupBtn').addEventListener('click', async () => {
 
 // live updates come through app.js's event stream
 window.onVoiceState = (data) => {
-  if (data.voiceSetup) {
+  if (data.voiceSetup && !same(data.voiceSetup, VO.standardSetup)) {
     VO.standardSetup = data.voiceSetup;
     renderSetup(data.voiceSetup);
     if (data.voiceSetup.status === 'done' && VO.info && VO.info.needs && VO.info.needs.length) {
       fetch('/api/voice?refresh').then((r) => r.json()).then((i) => { VO.info = i; renderSetup(null); renderAll(); });
     }
   }
-  if (data.voiceExtra) {
+  if (data.voiceExtra && !same(data.voiceExtra, VO.extraState)) {
     const was = VO.extraState && VO.extraState.status;
     VO.extraState = data.voiceExtra;
     if (VO.info && data.voiceExtra.status === 'done' && was !== 'done') fetch('/api/voice').then((r) => r.json()).then((i) => { VO.info = i; renderAll(); });
     else if (VO.info) renderExtra();
   }
-  if (data.expressiveSetup) applyDownload(data.expressiveSetup);
-  if (data.voice) renderJob(data.voice);
+  if (data.expressiveSetup && !same(data.expressiveSetup, VO.setup)) applyDownload(data.expressiveSetup);
+  if (data.voice && !same(data.voice, VO.job)) renderJob(data.voice);
 };
 
 
