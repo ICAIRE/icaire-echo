@@ -903,6 +903,7 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
   server.getCurrent = () => current;
   server.getJob = () => job;
   server.getVoiceJob = () => voiceJob;
+  server.on('close', () => kokoro.releaseWarm()); // the Expressive models are let go with the server
   return server;
 }
 
