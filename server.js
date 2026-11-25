@@ -268,15 +268,17 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
   // The bot's Google sign-in, read from its Chrome profile: the account Chrome lists, or else Google's own
   // session cookie (only its name is read; cookie values stay encrypted)
   function botAccount() {
-    const { PROFILE } = require('./lib/session');
+    const { PROFILE, profileDir } = require('./lib/session');
+    const dir = path.join(PROFILE, profileDir());
     let email = null;
     try {
-      const prefs = JSON.parse(fs.readFileSync(path.join(PROFILE, 'Default', 'Preferences'), 'utf8'));
+      const prefs = JSON.parse(fs.readFileSync(path.join(dir, 'Preferences'), 'utf8'));
       email = (prefs.account_info || []).map((x) => x.email).find(Boolean) || null;
     } catch {}
     let signedIn = !!email;
     if (!signedIn) {
-      const src = path.join(PROFILE, 'Default', 'Cookies');
+      // newer Chrome keeps the cookies under Network/
+      const src = [path.join(dir, 'Network', 'Cookies'), path.join(dir, 'Cookies')].find((f) => fs.existsSync(f)) || path.join(dir, 'Cookies');
       const tmp = path.join(require('os').tmpdir(), 'echo-cookies-' + process.pid + '.db');
       try {
         fs.copyFileSync(src, tmp); // Chrome may have the file open
@@ -819,9 +821,9 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
       // sign the bot's browser into a Google account: opens Google's sign-in on the bot's own profile; the person signs in
       if (req.method === 'POST' && p === '/api/login') {
         if (current && current.active) return json(res, 409, { error: 'The bot is in a meeting. Stop it first, then sign it in.' });
-        const { PROFILE, CHROME } = require('./lib/session');
+        const { PROFILE, CHROME, profileDir } = require('./lib/session');
         fs.mkdirSync(PROFILE, { recursive: true });
-        spawn(CHROME, [`--user-data-dir=${PROFILE}`, '--no-first-run', '--no-default-browser-check', 'https://accounts.google.com/'], { detached: true, stdio: 'ignore' }).unref();
+        spawn(CHROME, [`--user-data-dir=${PROFILE}`, `--profile-directory=${profileDir()}`, '--no-first-run', '--no-default-browser-check', 'https://accounts.google.com/'], { detached: true, stdio: 'ignore' }).unref();
         return json(res, 200, { ok: true });
       }
       // the Mac app runs without a window: the panel's Quit button ends it (never mid-recording or mid-job)
