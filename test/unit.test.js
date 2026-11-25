@@ -230,3 +230,80 @@ test('loadWhisper reads openai/faster-whisper JSON, whisper.cpp JSON, SRT and VT
   assert.throws(() => loadWhisper(w('e.json', '{"foo":1}')), /Unrecognized/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('ListAccounts preserves Google session order and reads only the account email field', () => {
+  const { parseAccounts } = require('../lib/meet');
+  const row = (email) => ['gaia.l.a', 1, 'display@example.org', email];
+  const expired = row('expired@example.org');
+  expired[9] = 0;
+  const signedOut = row('remembered@example.org');
+  signedOut[14] = 1;
+  const body = JSON.stringify(['gaia.l.a.r', [row('first@example.org'), expired, signedOut, row('second@example.org')]]);
+  assert.deepEqual(parseAccounts(")]}'\n" + body), [
+    { email: 'first@example.org', valid: true },
+    { email: 'expired@example.org', valid: false },
+    { email: 'second@example.org', valid: true },
+  ]);
+  assert.deepEqual(parseAccounts('["gaia.l.a.r",[]]'), []);
+  for (const bad of ['<html>', '{}', '["gaia.l.a.r",[["gaia.l.a",1,"display@example.org"]]]']) {
+    assert.throws(() => parseAccounts(bad), /could not read/i);
+  }
+});
+
+test('joins with the Google web session index and explains account lookup failures', async (t) => {
+  const { join } = require('../lib/meet');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mrb-profile-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, 'Preferences'), JSON.stringify({ account_info: [{ email: 'Chrome@example.org' }] }));
+  const body = JSON.stringify(['gaia.l.a.r', [
+    ['gaia.l.a', 1, 'Default', 'default@example.org'],
+    ['gaia.l.a', 1, 'Recorder', 'recorder@example.org'],
+  ]]);
+  let ok = true;
+  const request = {
+    async post(url, options) {
+      assert.equal(url, 'https://accounts.google.com/ListAccounts?gpsia=1&source=ChromiumBrowser&json=standard');
+      assert.equal(options.headers.origin, 'https://www.google.com');
+      return { ok: () => ok, text: async () => body, dispose: async () => {} };
+    },
+  };
+  const opened = [];
+  const logs = [];
+  const page = {
+    context: () => ({ request }),
+    goto: async (url) => { opened.push(url); },
+    locator: (selector) => {
+      assert.equal(selector, '#profile_path');
+      return { innerText: async () => dir };
+    },
+  };
+  const options = { url: 'https://meet.google.com/abc-defg-hij?test=1', log: (msg) => logs.push(msg), shouldAbort: () => true };
+  await assert.rejects(join(page, { ...options, account: 'absent@example.org' }), /absent@example\.org is not signed in/);
+  await assert.rejects(join(page, { ...options, account: 'chrome@example.org' }), {
+    message: "chrome@example.org is signed in to Chrome but not to Google in the bot's browser. Sign it in at accounts.google.com from More, Sign the bot in to Google.",
+  });
+  assert.deepEqual(opened.splice(0), ['chrome://version/', 'chrome://version/']);
+  ok = false;
+  await assert.rejects(join(page, { ...options, account: 'chrome@example.org' }), /Could not check whether chrome@example\.org is signed in/);
+  assert.deepEqual(opened, []);
+  ok = true;
+  await assert.rejects(join(page, { ...options, account: 'RECORDER@example.org' }), /Cancelled/);
+  assert.deepEqual(opened, [options.url + '&authuser=1']);
+  assert.deepEqual(logs, ['Joining as recorder@example.org.']);
+});
+
+test('/api/account excludes Chrome-only accounts when offline', async (t) => {
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'mrb-profile-'));
+  t.after(() => fs.rmSync(profile, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(profile, 'Default'));
+  fs.writeFileSync(path.join(profile, 'Default', 'Preferences'), JSON.stringify({ account_info: [{ email: 'chrome@example.org' }] }));
+  const server = require('../server').createServer({ runOptions: { profile } });
+  const [handle] = server.listeners('request');
+  let payload;
+  await handle({ method: 'GET', url: '/api/account', headers: { host: 'localhost' } }, {
+    setHeader() {},
+    writeHead(status) { assert.equal(status, 200); },
+    end(body) { payload = JSON.parse(body); },
+  });
+  assert.deepEqual(payload, { signedIn: false, accounts: [], email: null, source: 'profile' });
+});

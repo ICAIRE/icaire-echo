@@ -28,6 +28,7 @@ function probe(file) {
 async function runBot(mock, opts = {}, during) {
   const outRoot = tmp('mrb-out-');
   const profile = tmp('mrb-prof-');
+  const meeting = mockMeet(mock);
   let page;
   let probeInfo = {};
   const run = new BotRun({
@@ -36,10 +37,11 @@ async function runBot(mock, opts = {}, during) {
     profile,
     pollMs: 500,
     previewMs: 1000,
+    ...meeting,
     ...opts,
     setupPage: async (p) => {
       page = p;
-      await mockMeet(mock)(p);
+      await meeting.setupPage(p);
     },
   });
   const statuses = [];
@@ -48,13 +50,16 @@ async function runBot(mock, opts = {}, during) {
     if (statuses[statuses.length - 1] !== s.status) statuses.push(s.status);
     if (s.status === 'recording' && !duringP) {
       duringP = (async () => {
-        probeInfo = await page.evaluate(() => ({ incallAt: window.__incallAt, t0: window.__mrb.t0, log: window.__log })).catch(() => ({}));
+        probeInfo = await page.evaluate(() => ({ incallAt: window.__incallAt, t0: window.__mrb.t0, log: window.__log, authuser: new URLSearchParams(location.search).get('authuser') })).catch(() => ({}));
         if (during) await during(run, page);
       })();
     }
   });
-  const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('run timed out; statuses: ' + statuses.join(' > '))), opts.timeoutMs || 90000));
-  const snap = await Promise.race([run.run(), timeout]);
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('run timed out; statuses: ' + statuses.join(' > '))), opts.timeoutMs || 90000);
+  });
+  const snap = await Promise.race([run.run(), timeout]).finally(() => clearTimeout(timer));
   await duringP;
   fs.rmSync(profile, { recursive: true, force: true });
   return { snap, run, statuses, probeInfo, outRoot, dir: snap.outDir };
@@ -135,7 +140,7 @@ test('everyone leaves: bot leaves on its own after the alone timeout', async () 
 
 test('cancel while waiting to be admitted: nothing is left on disk', async () => {
   const outRoot = tmp('mrb-out-');
-  const run = new BotRun({ url: URL, outRoot, profile: tmp('mrb-prof-'), setupPage: mockMeet({ admitDelayMs: 600000 }) });
+  const run = new BotRun({ url: URL, outRoot, profile: tmp('mrb-prof-'), ...mockMeet({ admitDelayMs: 600000 }) });
   run.on('update', (s) => s.status === 'waiting' && setTimeout(() => run.stop('cancel test'), 500));
   const snap = await run.run();
   assert.equal(snap.status, 'cancelled');
@@ -150,7 +155,7 @@ for (const [scenario, pattern] of [
 ]) {
   test(`join failure (${scenario}) gives a clear error and leaves nothing behind`, async () => {
     const outRoot = tmp('mrb-out-');
-    const run = new BotRun({ url: URL, outRoot, profile: tmp('mrb-prof-'), setupPage: mockMeet({ scenario, admitDelayMs: 500 }) });
+    const run = new BotRun({ url: URL, outRoot, profile: tmp('mrb-prof-'), ...mockMeet({ scenario, admitDelayMs: 500 }) });
     const snap = await run.run();
     assert.equal(snap.status, 'error');
     assert.match(snap.error, pattern);
@@ -166,4 +171,33 @@ test('talk mode: you talk in the bot window, your microphone is in the recording
   assert.ok(run.logs.some((l) => /Your microphone is in the recording/.test(l.msg)), run.logs.map((l) => l.msg).join('\n'));
   const a = probe(path.join(snap.outDir, 'audio.wav'));
   assert.ok(a.meanDb > -60, `the microphone is heard in audio.wav (mean ${a.meanDb} dB)`);
+});
+
+test('dismisses the covering tip and joins here too with the selected Google account', async () => {
+  const accounts = ['default@example.org', 'recorder@example.org'];
+  const { snap, probeInfo, outRoot } = await runBot(
+    { accounts, scenario: 'otherDevice', prejoinTip: true, endAfterMs: 4000 },
+    { account: 'Recorder@example.org' }
+  );
+  try {
+    assert.equal(snap.status, 'done', snap.error);
+    assert.equal(probeInfo.authuser, '1');
+    assert.deepEqual(probeInfo.log, ['tip-dismissed', 'notifications-dismissed', 'no-devices', 'other-ways', 'join-here-too', 'ask:Recorder', 'got-it']);
+    assert.ok(snap.logs.some((l) => l.msg.includes('Joining as recorder@example.org')));
+  } finally {
+    fs.rmSync(outRoot, { recursive: true, force: true });
+  }
+});
+
+test('no join button logs the visible choices once and stops before the admission timeout', async () => {
+  const { snap, outRoot } = await runBot({ scenario: 'noJoin' }, { joinTimeoutMs: 3000, timeoutMs: 20000 });
+  try {
+    assert.equal(snap.status, 'error');
+    assert.match(snap.error, /could not press a join button/i);
+    const warnings = snap.logs.filter((l) => l.msg.includes('Buttons on the page'));
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0].msg, /Switch here, Allow/);
+  } finally {
+    fs.rmSync(outRoot, { recursive: true, force: true });
+  }
 });

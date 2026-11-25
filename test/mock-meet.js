@@ -42,11 +42,27 @@ let selfName = 'You';
 window.__log = [];
 
 function prejoin() {
+  if (cfg.scenario === 'noJoin') {
+    app.innerHTML = '<button>Switch here</button><button>Allow</button>';
+    app.onclick = () => incall(); // An unsafe click must fail the timeout test.
+    return;
+  }
   app.innerHTML = '<h2>Ready to join?</h2><input aria-label="Your name" placeholder="Your name"><button>Ask to join</button>';
-  const dlg = $h('<div role="dialog"><p>Do you want people to see and hear you in the meeting?</p><button>Continue without microphone and camera</button></div>');
+  const dlg = $h('<div role="dialog"><p>Do you want people to see and hear you in the meeting?</p><a href="#">Continue without microphone and camera</a><button>Allow microphone and camera</button></div>');
   document.body.append(dlg);
-  dlg.querySelector('button').onclick = () => { window.__log.push('no-devices'); dlg.remove(); };
-  app.querySelector('button').onclick = () => {
+  dlg.querySelector('a').onclick = (e) => { e.preventDefault(); window.__log.push('no-devices'); dlg.remove(); };
+  dlg.querySelector('button').onclick = () => window.__log.push('allowed');
+  if (cfg.prejoinTip) {
+    const tip = $h('<aside style="position:fixed;inset:0;background:white"><p>Switch the call here</p><button>Got it</button></aside>');
+    document.body.append(tip);
+    tip.querySelector('button').onclick = () => {
+      window.__log.push('tip-dismissed');
+      tip.innerHTML = '<p>Receive desktop notifications</p><button>Allow</button><button>Not now</button>';
+      tip.querySelector('button').onclick = () => window.__log.push('allowed');
+      tip.lastElementChild.onclick = () => { window.__log.push('notifications-dismissed'); tip.remove(); };
+    };
+  }
+  function ask() {
     if (document.querySelector('[role=dialog]')) { window.__log.push('join-clicked-under-dialog'); }
     selfName = app.querySelector('input').value || 'Guest';
     window.__log.push('ask:' + selfName);
@@ -54,7 +70,20 @@ function prejoin() {
     setTimeout(() => cfg.scenario === 'denied'
       ? (app.innerHTML = '<p>Someone in the call denied your request to join</p>')
       : incall(), cfg.admitDelayMs);
-  };
+  }
+  const main = app.querySelector('button');
+  if (cfg.scenario === 'otherDevice') {
+    main.textContent = 'Switch here';
+    main.onclick = () => window.__log.push('switched');
+    const other = $h('<button>Other ways to join</button>');
+    app.append(other);
+    other.onclick = () => {
+      window.__log.push('other-ways');
+      const too = $h('<div role="menuitem" tabindex="0">Join here too</div>');
+      app.append(too);
+      too.onclick = () => { window.__log.push('join-here-too'); ask(); };
+    };
+  } else main.onclick = ask;
 }
 
 function tile(id, name) {
@@ -129,15 +158,18 @@ else prejoin();
 </script></body></html>`;
 }
 
-// Returns a setupPage(page) hook for BotRun / launch().
+// BotRun options for a fake meeting and its signed-in accounts.
 function mockMeet(overrides = {}) {
   const cfg = { ...BASE, ...overrides };
-  return async (page) => {
-    await page.route('https://accounts.google.com/**', (r) => r.fulfill({ contentType: 'text/html', body: '<h1>Sign in</h1>' }));
-    await page.route('https://meet.google.com/**', (r) => {
-      if (cfg.scenario === 'signin') return r.fulfill({ contentType: 'text/html', body: '<script>location.replace("https://accounts.google.com/v3/signin?continue=meet")</script>' });
-      return r.fulfill({ contentType: 'text/html', body: html(cfg) });
-    });
+  return {
+    listAccounts: async () => (cfg.accounts || []).map((email) => ({ email, valid: true })),
+    async setupPage(page) {
+      await page.route('https://accounts.google.com/**', (r) => r.fulfill({ contentType: 'text/html', body: '<h1>Sign in</h1>' }));
+      await page.route('https://meet.google.com/**', (r) => {
+        if (cfg.scenario === 'signin') return r.fulfill({ contentType: 'text/html', body: '<script>location.replace("https://accounts.google.com/v3/signin?continue=meet")</script>' });
+        return r.fulfill({ contentType: 'text/html', body: html(cfg) });
+      });
+    },
   };
 }
 

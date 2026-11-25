@@ -33,7 +33,7 @@ test('control panel: join, live stats, end, the recording page, captions, Whispe
   const server = createServer({
     outRoot,
     autoTranscribe: false, // this test uploads its own Whisper file instead
-    runOptions: { profile, noOpen: true, previewMs: 1000, pollMs: 500, setupPage: mockMeet({ admitDelayMs: 1200 }) },
+    runOptions: { profile, noOpen: true, previewMs: 1000, pollMs: 500, ...mockMeet({ admitDelayMs: 1200 }) },
   });
   await new Promise((r) => server.listen(PORT, '127.0.0.1', r));
   const browser = await chromium.launch({ executablePath: CHROME, headless: true });

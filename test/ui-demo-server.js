@@ -25,7 +25,7 @@ const server = createServer({
   runOptions: {
     profile: fs.mkdtempSync(path.join(os.tmpdir(), 'mrb-demo-prof-')),
     noOpen: true,
-    setupPage: mockMeet({ participants: people, schedule, endAfterMs: minutes * 60000, admitDelayMs: 2500 }),
+    ...mockMeet({ participants: people, schedule, endAfterMs: minutes * 60000, admitDelayMs: 2500 }),
   },
 });
 const port = Number(process.env.PORT || 4778);

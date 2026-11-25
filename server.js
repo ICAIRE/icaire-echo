@@ -278,35 +278,34 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
     for (let n = 2; fs.existsSync(path.join(root, id)) || (voiceJob && voiceJob.id === id) || local.has(id); n++) id = `${base}-${n}`;
     return id;
   }
-  // The bot's Google sign-in, read from its Chrome profile: the account Chrome lists, or else Google's own
-  // session cookie (only its name is read; cookie values stay encrypted)
+  // Google supplies the default and sign-in order during a run. Offline, Chrome's
+  // account_info is a profile inventory and cannot identify the default account.
   function botAccount() {
     const { PROFILE, profileDir } = require('./lib/session');
-    const dir = path.join(PROFILE, profileDir());
-    let email = null;
-    try {
-      const prefs = JSON.parse(fs.readFileSync(path.join(dir, 'Preferences'), 'utf8'));
-      email = (prefs.account_info || []).map((x) => x.email).find(Boolean) || null;
-    } catch {}
-    let signedIn = !!email;
-    if (!signedIn) {
-      // newer Chrome keeps the cookies under Network/
-      const src = [path.join(dir, 'Network', 'Cookies'), path.join(dir, 'Cookies')].find((f) => fs.existsSync(f)) || path.join(dir, 'Cookies');
-      const tmp = path.join(require('os').tmpdir(), 'echo-cookies-' + process.pid + '.db');
-      try {
-        fs.copyFileSync(src, tmp); // Chrome may have the file open
-        // node:sqlite warns that it is experimental the first time it loads: not news for the app's log
-        const warn = process.emitWarning;
-        process.emitWarning = (w, ...rest) => (/SQLite/i.test(String((w && w.message) || w)) ? undefined : warn.call(process, w, ...rest));
-        let DatabaseSync;
-        try { ({ DatabaseSync } = require('node:sqlite')); } finally { process.emitWarning = warn; }
-        const db = new DatabaseSync(tmp, { readOnly: true });
-        signedIn = db.prepare("SELECT COUNT(*) AS n FROM cookies WHERE host_key = '.google.com' AND name IN ('SID', '__Secure-1PSID', '__Secure-3PSID')").get().n > 0;
-        db.close();
-      } catch {}
-      fs.rmSync(tmp, { force: true });
+    if (current?.active && current.googleAccounts) {
+      const listed = current.googleAccounts;
+      const accounts = listed.filter((a) => a.valid).map((a) => a.email);
+      return { signedIn: !!accounts.length, accounts, email: listed[0]?.valid ? listed[0].email : null, source: 'google' };
     }
-    return { signedIn, email };
+    const profile = runOptions.profile || PROFILE;
+    const dir = path.join(profile, profileDir(profile));
+    let signedIn = false;
+    // newer Chrome keeps the cookies under Network/
+    const src = [path.join(dir, 'Network', 'Cookies'), path.join(dir, 'Cookies')].find((f) => fs.existsSync(f)) || path.join(dir, 'Cookies');
+    const tmp = path.join(require('os').tmpdir(), 'echo-cookies-' + process.pid + '.db');
+    try {
+      fs.copyFileSync(src, tmp); // Chrome may have the file open
+      // node:sqlite warns that it is experimental the first time it loads: not news for the app's log
+      const warn = process.emitWarning;
+      process.emitWarning = (w, ...rest) => (/SQLite/i.test(String((w && w.message) || w)) ? undefined : warn.call(process, w, ...rest));
+      let DatabaseSync;
+      try { ({ DatabaseSync } = require('node:sqlite')); } finally { process.emitWarning = warn; }
+      const db = new DatabaseSync(tmp, { readOnly: true });
+      signedIn = db.prepare("SELECT COUNT(*) AS n FROM cookies WHERE host_key = '.google.com' AND name IN ('SID', '__Secure-1PSID', '__Secure-3PSID')").get().n > 0;
+      db.close();
+    } catch {}
+    fs.rmSync(tmp, { force: true });
+    return { signedIn, accounts: [], email: null, source: 'profile' };
   }
 
   const recDir = (id) => (/^[\w-]+$/.test(id || '') ? path.join(outRoot, id) : null);
@@ -536,8 +535,11 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
         let u;
         try { u = new URL(link); } catch { return json(res, 400, { error: 'That is not a valid link.' }); }
         if (u.hostname !== 'meet.google.com' || u.pathname.length < 4) return json(res, 400, { error: 'Paste a Google Meet link, like https://meet.google.com/abc-defg-hij' });
+        // which of the bot's signed-in Google accounts joins (Meet's own authuser), when one is named
+        const account = String(body.account || '').trim();
+        if (account && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account)) return json(res, 400, { error: 'Enter a valid Google account email.' });
         const name = String(body.name || 'Recorder').trim().slice(0, 60) || 'Recorder';
-        current = new BotRun({ ...runOptions, outRoot, url: u.toString(), name, show: !!body.show || !!body.talk, talk: !!body.talk });
+        current = new BotRun({ ...runOptions, outRoot, url: u.toString(), account, name, show: !!body.show || !!body.talk, talk: !!body.talk });
         current.on('update', broadcast);
         const run = current;
         const title = cleanTitle(body.title);

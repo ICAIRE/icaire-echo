@@ -463,13 +463,15 @@ else if (require.main === module) (async () => {
     }
 
     log('Sending the recorder...');
-    const run = await api('POST', '/api/join', { url, name: 'Recorder' });
+    // --bot-account <email>: the bot joins as that one of its signed-in accounts (another than the host's: it waits)
+    const run = await api('POST', '/api/join', { url, name: 'Recorder', account: opt('--bot-account', undefined) });
     for (let n = 0; ; n++) {
       await sleep(1000);
       const c = (await api('GET', '/api/state')).current;
       if (c.status === 'recording') break;
       if (!c.active) throw new Error('Recorder ended: ' + (c.error || c.status));
-      if (n === 180) throw new Error('Recorder never started recording (' + c.status + ')');
+      if (c.status === 'waiting' && !run.saidWaiting) (run.saidWaiting = true), log('Recorder is waiting to be let in');
+      if (n === 300) throw new Error('Recorder never started recording (' + c.status + ')');
     }
     log('Recorder is recording (' + run.id + ')');
     if (LOBBY) {
@@ -532,7 +534,8 @@ else if (require.main === module) (async () => {
     cleanup = async () => {};
 
     log('Transcribing with Whisper...');
-    await api('POST', '/api/transcribe/' + rec.id, {});
+    // the app starts the transcript on its own when a meeting is saved: asking again then answers 409, which is fine
+    await api('POST', '/api/transcribe/' + rec.id, {}).catch((e) => { if (!/ 409 /.test(e.message)) throw e; });
     for (let n = 0; n < 1200; n++) {
       await sleep(1000);
       const t = (await api('GET', '/api/state')).transcribe;
