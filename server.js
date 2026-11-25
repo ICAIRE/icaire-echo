@@ -201,6 +201,17 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
       p.on('error', () => resolve(false));
     });
 
+  // the microphone and the call's sound into one 16 kHz track; a limiter keeps two loud voices together from clipping
+  const mixToWav = (mic, sys, dst) =>
+    new Promise((resolve) => {
+      const args = ['-hide_banner', '-y', '-ignore_length', '1', '-i', mic];
+      if (sys) args.push('-ignore_length', '1', '-i', sys, '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.89:level=false');
+      args.push('-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', dst);
+      const p = spawn(ffmpegPath, args, { windowsHide: true });
+      p.on('close', (code) => resolve(code === 0));
+      p.on('error', () => resolve(false));
+    });
+
   function needsExtra(settings) {
     const lang = settings.lang && settings.lang !== 'auto' ? settings.lang : (kokoro.PRESETS.languages.find((l) => l.prefix === String(settings.voice)[0]) || { code: 'en-us' }).code;
     const key = kokoro.extraFor(lang);
@@ -400,7 +411,7 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
     // a page on another site (even one only loading a picture or a sound from here) gets nothing
     if (req.headers['sec-fetch-site'] === 'cross-site') return json(res, 403, { error: 'forbidden' });
     // the panel loads nothing from elsewhere, runs only its own scripts, and cannot be framed by another page
-    res.setHeader('content-security-policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+    res.setHeader('content-security-policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
     res.setHeader('x-content-type-options', 'nosniff');
     res.setHeader('referrer-policy', 'no-referrer');
     res.setHeader('x-frame-options', 'DENY');
@@ -681,8 +692,9 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
         const body = await readBody(req);
         const people = Math.round(Number(body.people)); // how many people talk, when the person said so
         local.set(id, { startedAt: new Date().toISOString(), title: cleanTitle(body.title), mime: String(body.mime || 'audio/webm').slice(0, 80), source: body.source === 'microphone+computer' ? 'microphone+computer' : 'microphone', people: people >= 1 && people <= 20 ? people : null });
-        fs.writeFileSync(path.join(dir, 'audio.part'), '');
-        return json(res, 200, { id });
+        // the desktop app records natively into this folder (mic.wav, system.wav); the browser sends chunks of audio.part
+        if (!body.native) fs.writeFileSync(path.join(dir, 'audio.part'), '');
+        return json(res, 200, { id, dir });
       }
       if (req.method === 'POST' && (m = /^\/api\/local\/([\w-]+)\/chunk$/.exec(p))) {
         if (!local.has(m[1])) return json(res, 404, { error: 'No recording in progress with that id.' });
@@ -697,13 +709,23 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
         const body = await readBody(req);
         const dir = path.join(outRoot, m[1]);
         const part = path.join(dir, 'audio.part');
-        if (!fs.existsSync(part) || fs.statSync(part).size === 0) {
-          fs.rmSync(dir, { recursive: true, force: true });
-          return json(res, 400, { error: 'Nothing was recorded. Check that the microphone is allowed and working.' });
+        const mic = path.join(dir, 'mic.wav');
+        const sys = path.join(dir, 'system.wav');
+        const has = (f) => fs.existsSync(f) && fs.statSync(f).size > 1024;
+        if (has(mic)) {
+          // recorded by the desktop app: the microphone and the computer's sound, mixed here into one track
+          const ok = await mixToWav(mic, has(sys) ? sys : null, path.join(dir, 'audio.wav'));
+          if (!ok) return json(res, 500, { error: 'Could not mix the recording into audio.wav. The raw files are kept (mic.wav, system.wav).' });
+          for (const f of [mic, sys]) fs.rmSync(f, { force: true });
+        } else {
+          if (!fs.existsSync(part) || fs.statSync(part).size === 0) {
+            fs.rmSync(dir, { recursive: true, force: true });
+            return json(res, 400, { error: 'Nothing was recorded. Check that the microphone is allowed and working.' });
+          }
+          const ok = await toWav(part, path.join(dir, 'audio.wav'));
+          if (!ok) return json(res, 500, { error: 'Could not convert the recording to audio.wav. The raw file is kept as audio.part.' });
+          fs.unlinkSync(part);
         }
-        const ok = await toWav(part, path.join(dir, 'audio.wav'));
-        if (!ok) return json(res, 500, { error: 'Could not convert the recording to audio.wav. The raw file is kept as audio.part.' });
-        fs.unlinkSync(part);
         const durationSec = Math.max(0, Number(body.durationMs) || 0) / 1000;
         fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ kind: 'local', ...(rec.title ? { title: rec.title } : {}), source: rec.source, startedAt: rec.startedAt, durationSec, people: rec.people }, null, 2));
         let transcribe = null;
@@ -768,6 +790,39 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
   // the launcher starts the app again when it ends with RESTART_CODE (and installs any new parts first)
   const restart = () => setTimeout(() => process.exit(RESTART_CODE), 1500);
   if (autoUpdate) updater.auto({ isIdle: idle, onUpdated: restart });
+
+  // A recording on this computer that never finished (the app was closed or restarted while recording, for example
+  // by macOS after a permission was granted) is rescued when the app starts: its files become audio.wav and it is
+  // listed like any other, so nothing recorded is lost.
+  async function rescueInterrupted() {
+    if (!fs.existsSync(outRoot)) return;
+    for (const d of fs.readdirSync(outRoot, { withFileTypes: true })) {
+      if (!d.isDirectory() || !/^[\w-]+$/.test(d.name) || local.has(d.name)) continue;
+      const dir = path.join(outRoot, d.name);
+      if (fs.existsSync(path.join(dir, 'audio.wav'))) continue;
+      const mic = path.join(dir, 'mic.wav');
+      const sys = path.join(dir, 'system.wav');
+      const part = path.join(dir, 'audio.part');
+      const big = (f) => fs.existsSync(f) && fs.statSync(f).size > 4096;
+      let ok = false;
+      const hadSys = big(sys);
+      if (big(mic)) ok = await mixToWav(mic, hadSys ? sys : null, path.join(dir, 'audio.wav'));
+      else if (big(part)) ok = await toWav(part, path.join(dir, 'audio.wav'));
+      if (!ok) continue;
+      for (const f of [mic, sys, part]) fs.rmSync(f, { force: true });
+      let durationSec = 0;
+      try {
+        const w = require('./lib/wav').read(path.join(dir, 'audio.wav'));
+        durationSec = w.samples.length / w.rate;
+      } catch {}
+      const started = /^(\d{4}-\d\d-\d\d)-(\d\d)-(\d\d)-(\d\d)/.exec(d.name);
+      const meta = { kind: 'local', source: hadSys ? 'microphone+computer' : 'microphone', startedAt: started ? `${started[1]}T${started[2]}:${started[3]}:${started[4]}Z` : null, durationSec, rescued: true };
+      if (!fs.existsSync(path.join(dir, 'meta.json'))) fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2));
+      console.log('Rescued an interrupted recording: ' + d.name);
+      broadcast();
+    }
+  }
+  setTimeout(() => rescueInterrupted().catch((e) => console.log('rescue: ' + e.message)), 1500);
 
   server.getCurrent = () => current;
   server.getJob = () => job;

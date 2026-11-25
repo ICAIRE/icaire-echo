@@ -14,3 +14,6 @@ installer/*.zip
 .DS_Store
 dist/
 packaging/icon-1024.png
+desktop/target/
+desktop/stage/
+desktop/gen/

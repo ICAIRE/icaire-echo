@@ -54,6 +54,16 @@ this computer. Give each one a name under **People**; the whole transcript follo
 **Create voice-over**. Put the cursor where you want silence and press a pause button. Voices go by
 Kokoro's own names (Heart, Bella, Fenrir…); **Pacing** sets how the voice reads.
 
+To make it livelier, select words and press **Slower**, **Faster**, **Softer**, **Louder**, **Higher** or
+**Lower**, pick a **Mood** (Excited, Calm, Serious, Whisper), or read them in **Another voice** for a second
+character. They show in the script as tags you can also type, and nest:
+
+```
+[excited]We did it![/excited] [pause 1s] [voice Michael]Well done, team.[/voice] [slow]Take a breath.[/slow]
+```
+
+Kokoro has no real emotions: a mood is a mix of speed, pitch and loudness, not acting.
+
 ## Your files
 
 Your recordings, voice-overs, models and the bot's sign-in are kept apart from the app, so a new version

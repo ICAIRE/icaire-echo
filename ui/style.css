@@ -749,3 +749,7 @@ body:not([data-mode='bot']) .meet-link { visibility: hidden; }
   #viewLive .live-tabs { flex-shrink: 0; }
   #viewLive .live-pane:not([hidden]) { flex: 1 1 auto; min-height: 0; overflow: auto; }
 }
+
+/* the tone toolbar */
+.tone-pick { min-height: 32px; padding: 4px 8px; font-size: 12px; border-radius: 7px; background: var(--side); border-color: var(--edge); }
+.tags-help { font-size: 11px; margin: -2px 0 10px; }

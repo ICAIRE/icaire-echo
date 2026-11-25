@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Merged into the app's Info.plist. Each says exactly what ICAIRE Echo does with the permission. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>ICAIRE Echo records your microphone only while you record, and writes the transcript on this computer. Nothing is sent anywhere.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>ICAIRE Echo records the sound of your call (the other people) only while you record, on this computer. Nothing is sent anywhere.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>macOS lists recording the computer's sound under screen recording. ICAIRE Echo records only the sound of your call while you record, never the picture.</string>
+</dict>
+</plist>

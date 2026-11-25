@@ -1,0 +1,30 @@
+[package]
+name = "icaire-echo"
+version = "1.0.0"
+description = "ICAIRE Echo: record meetings with names, and make voice-overs, on your own computer"
+edition = "2021"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# native recording: the microphone everywhere, and the computer's own sound (WASAPI loopback on Windows)
+cpal = "0.15"
+hound = "3"
+dirs = "5"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# the computer's own sound on a Mac (ScreenCaptureKit; macOS asks once for "Screen & System Audio Recording")
+screencapturekit = { version = "12", features = ["macos_13_0"] }
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "s"
+codegen-units = 1
+panic = "abort"

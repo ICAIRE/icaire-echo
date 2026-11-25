@@ -459,10 +459,47 @@ function callHelp(failed) {
   const how = MAC ? 'choose the tab your meeting is in and keep "Also share tab audio" on' : 'choose "Entire screen" and switch on "Also share system audio"';
   return failed ? `The call's sound wasn't shared, so recording didn't start. Press the microphone again, then ${how}.` : `When the browser asks what to share, ${how}.`;
 }
+// Inside the desktop app, recording is native: the microphone and the computer's sound are recorded by the app
+// itself (no share picker), into the recording's folder, and mixed into audio.wav when it ends.
+const NATIVE = window.__TAURI__ && window.__TAURI__.core;
+async function startNative() {
+  const err = $('startError');
+  const btn = $('bigBtn');
+  btn.disabled = true;
+  let id;
+  let dir;
+  try {
+    ({ id, dir } = await api('/api/local/start', { native: true, title: $('newTitle').value, source: $('localCall').checked ? 'microphone+computer' : 'microphone', people: Number($('people').value) || null }));
+    const r = await NATIVE.invoke('record_start', { dir, system: $('localCall').checked });
+    local = { id, native: true, call: r.system, t0: performance.now(), levels: [], device: r.device || 'Microphone', pausedMs: 0 };
+    if (r.system_error) toast('Recording your microphone only: ' + r.system_error);
+  } catch (e) {
+    btn.disabled = false;
+    err.textContent = String((e && e.message) || e);
+    if (id) api(`/api/local/${id}/finish`, { durationMs: 0 }).catch(() => {}); // nothing was recorded: the empty folder goes
+    return;
+  }
+  local.timer = setInterval(async () => {
+    const me = local;
+    if (!me || me.pausedAt || me.stopping) return;
+    try {
+      const l = await NATIVE.invoke('record_level');
+      me.levels.push(Math.min(1000, Math.round(Math.max(l.mic, l.system) * 1000)));
+      if (me.levels.length > 600) me.levels.shift();
+    } catch {}
+  }, 100);
+  btn.disabled = false;
+  $('notice').hidden = true;
+  if (where().family !== 'record' || where().page === 'rec') location.hash = '#record';
+  render();
+  route();
+}
+
 async function startLocal() {
   const err = $('startError');
   err.textContent = '';
   if (snap && snap.active) return void (err.textContent = 'The bot is in a meeting right now. End it first.');
+  if (NATIVE) return startNative();
   const btn = $('bigBtn');
   btn.disabled = true;
   // the other people's voices only come out of the speakers, and the microphone's echo cancelling removes
@@ -566,12 +603,13 @@ async function startLocal() {
 function togglePause() {
   const me = local;
   if (!me || me.stopping) return;
+  if (me.native) NATIVE.invoke('record_pause', { paused: !me.pausedAt }).catch((e) => toast(String(e)));
   if (me.pausedAt) {
-    me.rec.resume();
+    if (me.rec) me.rec.resume();
     me.pausedMs = (me.pausedMs || 0) + (performance.now() - me.pausedAt);
     me.pausedAt = null;
   } else {
-    me.rec.pause();
+    if (me.rec) me.rec.pause();
     me.pausedAt = performance.now();
   }
   render();
@@ -582,16 +620,22 @@ async function stopLocal() {
   if (!me || me.stopping) return;
   me.stopping = true;
   render();
-  const durationMs = Math.round(localElapsedMs(me));
-  await new Promise((r) => {
-    me.rec.onstop = r;
-    me.rec.stop();
-  });
+  let durationMs = Math.round(localElapsedMs(me));
   clearInterval(me.timer);
-  me.stream.getTracks().forEach((t) => t.stop());
-  if (me.shared) me.shared.getTracks().forEach((t) => t.stop());
-  me.ctx.close().catch(() => {});
-  await me.uploads;
+  if (me.native) {
+    // the files are complete once the app has closed them; their own length is the true recorded time
+    const sec = await NATIVE.invoke('record_stop').catch(() => 0);
+    if (sec > 0) durationMs = Math.round(sec * 1000);
+  } else {
+    await new Promise((r) => {
+      me.rec.onstop = r;
+      me.rec.stop();
+    });
+    me.stream.getTracks().forEach((t) => t.stop());
+    if (me.shared) me.shared.getTracks().forEach((t) => t.stop());
+    me.ctx.close().catch(() => {});
+    await me.uploads;
+  }
   try {
     const r = await api(`/api/local/${me.id}/finish`, { durationMs });
     local = null;
@@ -668,7 +712,9 @@ $('show').addEventListener('change', () => {
   renderReadiness();
 });
 $('localCall').addEventListener('change', () => {
-  $('localHint').textContent = $('localCall').checked ? 'Also records the other people in your call. ' + callHelp(false) : 'Only your microphone is recorded.';
+  $('localHint').textContent = $('localCall').checked
+    ? 'Also records the other people in your call. ' + (NATIVE ? (MAC ? 'The first time, macOS asks to allow ICAIRE Echo under Screen & System Audio Recording (only the sound is recorded).' : 'Nothing to share or pick.') : callHelp(false))
+    : 'Only your microphone is recorded.';
   try { localStorage.setItem('echo.call', $('localCall').checked ? '1' : '0'); } catch {}
   renderReadiness();
 });
@@ -1435,6 +1481,11 @@ function confirmBox({ title, text, ok = 'Delete' }) {
   return new Promise((resolve) => d.addEventListener('close', () => resolve(d.returnValue === 'ok'), { once: true }));
 }
 window.confirmBox = confirmBox;
+// the desktop app's window was closed while something was still recording or being made
+window.echoConfirmQuit = async () => {
+  const sure = await confirmBox({ title: 'Quit ICAIRE Echo?', text: 'Something is still recording or being made. If you quit now, it stops and what is not saved yet is lost.', ok: 'Quit anyway' });
+  if (sure && NATIVE) NATIVE.invoke('quit_now');
+};
 
 // ---------- keyboard ----------
 document.addEventListener('keydown', (e) => {

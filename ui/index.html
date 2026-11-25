@@ -326,6 +326,38 @@
           <button class="small" type="button" data-pause="2">2 s</button>
           <button class="small" type="button" data-pause="4">4 s</button>
         </div>
+        <div class="vo-tools" role="toolbar" aria-label="Insert a mood">
+          <span class="muted">Mood from the cursor on:</span>
+          <button class="small" type="button" data-tag="angry">Angry</button>
+          <button class="small" type="button" data-tag="happy">Happy</button>
+          <button class="small" type="button" data-tag="sad">Sad</button>
+          <button class="small" type="button" data-tag="excited">Excited</button>
+          <button class="small" type="button" data-tag="surprised">Surprised</button>
+          <button class="small" type="button" data-tag="calm">Calm</button>
+          <button class="small" type="button" data-tag="serious">Serious</button>
+          <button class="small" type="button" data-tag="whisper">Whisper</button>
+          <button class="small" type="button" data-tag="shouting">Shouting</button>
+          <button class="small" type="button" data-tag="normal">Normal</button>
+        </div>
+        <div class="vo-tools" role="toolbar" aria-label="Insert a sound or a change">
+          <span class="muted">Sounds:</span>
+          <button class="small" type="button" data-sound="laughs">Laughs</button>
+          <button class="small" type="button" data-sound="sighs">Sighs</button>
+          <button class="small" type="button" data-sound="breath">Breath</button>
+          <select class="small tone-pick" id="voAdjust" aria-label="Change the speed, loudness or pitch from the cursor">
+            <option value="">Speed, loudness, pitch…</option>
+            <option value="slow">Slower</option>
+            <option value="fast">Faster</option>
+            <option value="soft">Softer</option>
+            <option value="loud">Louder</option>
+            <option value="higher">Higher</option>
+            <option value="lower">Lower</option>
+          </select>
+          <select class="small tone-pick" id="voCharacter" aria-label="Another voice from the cursor">
+            <option value="">Another voice…</option>
+          </select>
+        </div>
+        <p class="tags-help muted">A mood lasts to the end of the line (or until the next mood); select words first to change only those. Kokoro has no real emotions: a mood is speed, pitch and loudness, and "Laughs" is the voice saying "ha ha".</p>
         <textarea id="voText" spellcheck="true" dir="auto" placeholder="Type or paste what should be said.&#10;&#10;Each sentence gets its own little pause; an empty line makes a longer one. For more, put the cursor where you want silence and press a pause button above, or type [pause 2s]."></textarea>
         <div class="vo-go">
           <button id="voGo" class="primary" type="button"><i data-icon="voices"></i>Create voice-over</button>

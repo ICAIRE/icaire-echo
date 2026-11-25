@@ -1,0 +1,22 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window shows the app served on this computer (localhost) and may call the recording commands",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://localhost:*",
+      "http://127.0.0.1:*"
+    ]
+  },
+  "permissions": [
+    "core:default",
+    "allow-record-start",
+    "allow-record-pause",
+    "allow-record-level",
+    "allow-record-stop",
+    "allow-quit-now"
+  ]
+}

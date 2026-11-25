@@ -345,7 +345,7 @@ function renderAdvanced() {
 
 function renderCount() {
   const t = $('voText').value.trim();
-  const said = t.replace(/\[\s*pause[^\]]*\]/gi, ' ').trim();
+  const said = t.replace(/\[[^\]]*\]/g, ' ').trim(); // tags are not words
   const words = said ? said.split(/\s+/).length : 0;
   const speed = Number(val('speed')) || 1;
   const sec = (words / (150 * (speed / 0.94))) * 60; // the presentation runs about 140-150 words a minute at 0.94
@@ -660,6 +660,7 @@ async function loadVoice() {
   } catch {}
   renderSetup(null);
   renderAll();
+  window.dispatchEvent(new Event('vo-info'));
   loadVoiceovers();
 }
 
@@ -741,3 +742,43 @@ document.querySelectorAll('.vo-tools [data-pause]').forEach((b) =>
     ta.dispatchEvent(new Event('input', { bubbles: true }));
   })
 );
+
+// tags, like ElevenLabs: put in at the cursor ("[angry] "), or around the selected words ("[angry]words[/angry]")
+function putTag(name, arg = '', sound = false) {
+  const ta = $('voText');
+  const a = ta.selectionStart ?? ta.value.length;
+  const b = ta.selectionEnd ?? a;
+  const open = `[${name}${arg ? ' ' + arg : ''}]`;
+  const inner = ta.value.slice(a, b);
+  if (inner && !sound) {
+    const close = `[/${name}]`;
+    ta.setRangeText(open + inner + close, a, b, 'end');
+  } else {
+    const before = ta.value.slice(0, a);
+    ta.setRangeText((before && !/\s$/.test(before) ? ' ' : '') + open + ' ', a, b, 'end');
+  }
+  ta.focus();
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+}
+document.querySelectorAll('[data-tag]').forEach((b) => b.addEventListener('click', () => putTag(b.dataset.tag)));
+document.querySelectorAll('[data-sound]').forEach((b) => b.addEventListener('click', () => putTag(b.dataset.sound, '', true)));
+$('voAdjust').addEventListener('change', () => {
+  if ($('voAdjust').value) putTag($('voAdjust').value);
+  $('voAdjust').value = '';
+});
+$('voCharacter').addEventListener('change', () => {
+  if ($('voCharacter').value) putTag('voice', $('voCharacter').value);
+  $('voCharacter').value = '';
+});
+// the voices for "Another voice…", filled once the voice list is known
+window.addEventListener('vo-info', () => {
+  const sel = $('voCharacter');
+  if (sel.options.length > 1 || !VO.info) return;
+  for (const l of VO.info.languages) {
+    const list = VO.info.voices.filter((x) => x.id[0] === l.prefix);
+    if (!list.length) continue;
+    const g = el('optgroup', { label: l.name });
+    for (const x of list) g.append(el('option', { value: x.name }, `${x.name} (${x.id[1] === 'f' ? 'female' : 'male'})`));
+    sel.append(g);
+  }
+});
