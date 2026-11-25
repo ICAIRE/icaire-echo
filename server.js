@@ -280,7 +280,11 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
       const tmp = path.join(require('os').tmpdir(), 'echo-cookies-' + process.pid + '.db');
       try {
         fs.copyFileSync(src, tmp); // Chrome may have the file open
-        const { DatabaseSync } = require('node:sqlite');
+        // node:sqlite warns that it is experimental the first time it loads: not news for the app's log
+        const warn = process.emitWarning;
+        process.emitWarning = (w, ...rest) => (/SQLite/i.test(String((w && w.message) || w)) ? undefined : warn.call(process, w, ...rest));
+        let DatabaseSync;
+        try { ({ DatabaseSync } = require('node:sqlite')); } finally { process.emitWarning = warn; }
         const db = new DatabaseSync(tmp, { readOnly: true });
         signedIn = db.prepare("SELECT COUNT(*) AS n FROM cookies WHERE host_key = '.google.com' AND name IN ('SID', '__Secure-1PSID', '__Secure-3PSID')").get().n > 0;
         db.close();
