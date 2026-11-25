@@ -10,7 +10,7 @@ web
 The owner and their teammates, most of them non-technical, each running the app on their own Windows PC or Mac. They run meetings in Google Meet, often around 8 people, in several languages (English and Arabic among them), with interruptions and overlapping speech. They use the control panel on the PC that runs the bot (http://localhost:4777) to send the bot into a call, keep an eye on it while the meeting runs, and afterwards find the recording and get a transcript that says who said what.
 
 ## Product Purpose
-Meet Recorder is a bot that joins a Google Meet call as its own participant and records it: one video file, one audio file (`audio.wav`), and a log of who spoke when, taken from Meet's own speaking indicators. After the call, a local Whisper model (whisper.cpp, on the graphics card when there is one) turns the audio into a transcript and the speaker log labels each line with a name. Success: anyone on the team can send the bot, trust it is recording, and come back to a readable, copyable transcript with names, without knowing how any of it works.
+ICAIRE Echo is a bot that joins a Google Meet call as its own participant and records it: one video file, one audio file (`audio.wav`), and a log of who spoke when, taken from Meet's own speaking indicators. After the call, a local Whisper model (whisper.cpp, on the graphics card when there is one) turns the audio into a transcript and the speaker log labels each line with a name. Success: anyone on the team can send the bot, trust it is recording, and come back to a readable, copyable transcript with names, without knowing how any of it works.
 
 Second tool (added 20 Nov 2026): **Voice-over**. Paste a script, pick a voice, get an MP3. The recommended voice is the Ideas City presentation's narrator with its exact settings (Kokoro af_heart, 0.94); the Manara FM radio hosts Layla and Omar are the second presets; all 54 Kokoro voices in 9 languages are available, and every setting is reachable under Advanced settings, hidden by default.
 
@@ -21,7 +21,7 @@ Nothing leaves the computer: no cloud service, no AI in the bot itself, no brows
 - Launch: paste a Meet link, optionally rename the bot, press Join. A host in the meeting must admit the bot ("Waiting to be let in").
 - During the call: recording clock, who is talking now, talk time per person, the bot's own view of the meeting, activity log, Stop & save.
 - After the call: a list of recordings with date, length, speakers and turns; a whole-meeting speaker overview; Transcribe (with progress bar and time left), Copy transcript, Watch with speaker captions, Open folder, download files, upload an external Whisper file to merge.
-- The bot needs a signed-in Google account set up once with `npm run login`; Meet refuses anonymous hidden browsers.
+- The bot needs a signed-in Google account, set up once in the app (More, then Sign the bot in to Google); Meet refuses anonymous hidden browsers.
 
 ## Capabilities and Constraints
 - One audio file per meeting; the user does not want a second one.
@@ -32,10 +32,10 @@ Nothing leaves the computer: no cloud service, no AI in the bot itself, no brows
 
 - Voice-over presets must stay identical to the Ideas City sources (checked by test/voice.test.js against the presentation's audio).
 - Kokoro has no Arabic; Japanese and Chinese need an optional language pack.
-- First run on a new computer installs everything itself (Start Meet Recorder.cmd / .command); big models download inside the app with progress.
+- Installed from one installer (a .dmg on a Mac, a setup .exe on Windows) with everything inside; big models download inside the app with progress.
 
 ## Brand Commitments
-Name: "Meet Recorder". Plain, everyday wording; no jargon such as "indicator signals" or "streams" in front of non-technical teammates.
+Name: "ICAIRE Echo". Plain, everyday wording; no jargon such as "indicator signals" or "streams" in front of non-technical teammates.
 
 ## Evidence on Hand
 Real recordings in `recordings/` (some test meetings with silent audio). A demo server (`npm run demo`, port 4778) fakes an 8-person meeting for trying the panel. No testimonials, customers or metrics exist; none should be invented.

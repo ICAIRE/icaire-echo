@@ -35,7 +35,9 @@ const MIME = {
   '.ndjson': 'text/plain; charset=utf-8',
 };
 
-function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = path.join(ROOT, 'voiceovers'), runOptions = {}, whisperDetect = whisper.detect, voiceDetect = kokoro.detect, autoTranscribe = true, autoUpdate = false } = {}) {
+const { DATA } = require('./lib/paths');
+
+function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = path.join(DATA, 'voiceovers'), runOptions = {}, whisperDetect = whisper.detect, voiceDetect = kokoro.detect, autoTranscribe = true, autoUpdate = false } = {}) {
   let voiceJob = null; // the voice-over being made (or the last one)
   const voiceSetup = new kokoro.Download();
   const whisperSetup = new whisper.ModelDownload();
@@ -245,10 +247,35 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
     for (let n = 2; fs.existsSync(path.join(root, id)) || (voiceJob && voiceJob.id === id) || local.has(id); n++) id = `${base}-${n}`;
     return id;
   }
+  // The bot's Google sign-in, read from its Chrome profile: the account Chrome lists, or else Google's own
+  // session cookie (only its name is read; cookie values stay encrypted)
+  function botAccount() {
+    const { PROFILE } = require('./lib/session');
+    let email = null;
+    try {
+      const prefs = JSON.parse(fs.readFileSync(path.join(PROFILE, 'Default', 'Preferences'), 'utf8'));
+      email = (prefs.account_info || []).map((x) => x.email).find(Boolean) || null;
+    } catch {}
+    let signedIn = !!email;
+    if (!signedIn) {
+      const src = path.join(PROFILE, 'Default', 'Cookies');
+      const tmp = path.join(require('os').tmpdir(), 'echo-cookies-' + process.pid + '.db');
+      try {
+        fs.copyFileSync(src, tmp); // Chrome may have the file open
+        const { DatabaseSync } = require('node:sqlite');
+        const db = new DatabaseSync(tmp, { readOnly: true });
+        signedIn = db.prepare("SELECT COUNT(*) AS n FROM cookies WHERE host_key = '.google.com' AND name IN ('SID', '__Secure-1PSID', '__Secure-3PSID')").get().n > 0;
+        db.close();
+      } catch {}
+      fs.rmSync(tmp, { force: true });
+    }
+    return { signedIn, email };
+  }
+
   const recDir = (id) => (/^[\w-]+$/.test(id || '') ? path.join(outRoot, id) : null);
 
   // small choices kept between runs (which transcriber model to use), in models/settings.json
-  const PREFS = path.join(ROOT, 'models', 'settings.json');
+  const PREFS = path.join(DATA, 'models', 'settings.json');
   const readPrefs = () => { try { return JSON.parse(fs.readFileSync(PREFS, 'utf8')); } catch { return {}; } };
   function writePrefs(change) {
     fs.mkdirSync(path.dirname(PREFS), { recursive: true });
@@ -339,7 +366,7 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
       return fs.readdirSync(p).reduce((a, f) => a + sizeOf(path.join(p, f)), 0);
     } catch { return 0; }
   };
-  const MODELS = path.join(ROOT, 'models');
+  const MODELS = path.join(DATA, 'models');
   function storage() {
     const items = [];
     const wdir = path.join(MODELS, 'whisper');
@@ -685,6 +712,8 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
         }
         return json(res, 200, { id: m[1], durationSec, transcribe });
       }
+      // is the bot signed in to Google? (read from its own profile on this computer, nothing is sent anywhere)
+      if (req.method === 'GET' && p === '/api/account') return json(res, 200, botAccount());
       // sign the bot's browser into a Google account: opens Google's sign-in on the bot's own profile; the person signs in
       if (req.method === 'POST' && p === '/api/login') {
         if (current && current.active) return json(res, 409, { error: 'The bot is in a meeting. Stop it first, then sign it in.' });
@@ -749,9 +778,20 @@ function createServer({ outRoot = path.join(ROOT, 'recordings'), voiceRoot = pat
 if (require.main === module) {
   const port = Number(process.env.PORT || 4777);
   const server = createServer({ autoUpdate: true });
+  const openLink = (link) => {
+    if (process.platform === 'win32') spawn('cmd', ['/c', 'start', '', link], { detached: true, stdio: 'ignore' }).unref();
+    else spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [link], { detached: true, stdio: 'ignore' }).unref();
+  };
+  // already running (opened twice): show the one that runs, and leave
+  server.on('error', (e) => {
+    if (e.code !== 'EADDRINUSE') throw e;
+    console.log(`ICAIRE Echo is already running: http://localhost:${port}`);
+    if (!process.argv.includes('--no-open')) openLink(`http://localhost:${port}`);
+    setTimeout(() => process.exit(0), 500);
+  });
   server.listen(port, '127.0.0.1', () => {
     const link = `http://localhost:${port}`;
-    console.log(`Meet Recorder control panel: ${link}\n(keep this window open; Ctrl+C to quit)`);
+    console.log(`ICAIRE Echo: ${link}\n(keep this window open; Ctrl+C to quit)`);
     if (!process.argv.includes('--no-open')) {
       if (process.platform === 'win32') spawn('cmd', ['/c', 'start', '', link], { detached: true, stdio: 'ignore' }).unref();
       else spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [link], { detached: true, stdio: 'ignore' }).unref();

@@ -145,7 +145,7 @@ test('cancel while waiting to be admitted: nothing is left on disk', async () =>
 
 for (const [scenario, pattern] of [
   ['blocked', /refused to let the bot join/],
-  ['signin', /npm run login/],
+  ['signin', /Sign the bot in to Google/],
   ['denied', /declined/],
 ]) {
   test(`join failure (${scenario}) gives a clear error and leaves nothing behind`, async () => {

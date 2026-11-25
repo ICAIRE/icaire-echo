@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// One-time setup for transcription, on Windows and macOS. Run by "Start Meet Recorder". No Python is needed:
+// One-time setup for transcription, on Windows and macOS. For a copy run from the code (the installed app has all of this inside). No Python is needed:
 // the voice engine comes with the app (npm install), and the transcriber is whisper.cpp's program, whisper-cli:
 //   Mac:      `brew install whisper-cpp` (Homebrew), or the download page when there is no Homebrew
 //   Windows:  the official build from github.com/ggml-org/whisper.cpp, into models/whisper/bin (the NVIDIA build
@@ -45,14 +45,14 @@ function openPage(url) {
   if (MAC) {
     if (!has('brew')) {
       say('\nThe transcriber (whisper.cpp) installs with Homebrew, which is not on this Mac.');
-      say('The Homebrew page is opening: install it, then open Start Meet Recorder again.');
+      say('The Homebrew page is opening: install it, then run node setup.js again.');
       say('(The meeting bot and voice-overs work without it.)\n');
       openPage('https://brew.sh');
       return;
     }
     say('Installing the transcriber (whisper.cpp, Homebrew). This happens once.');
     if (!runLoud('brew', ['install', 'whisper-cpp'])) {
-      say('The install stopped. Check the internet connection and open Start Meet Recorder again.');
+      say('The install stopped. Check the internet connection and run node setup.js again.');
       return;
     }
     say('Transcriber: ready. Its model downloads from the app the first time you use it.');

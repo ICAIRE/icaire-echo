@@ -204,6 +204,7 @@ async function renderReadiness() {
   } else {
     items.push(item($('show').checked || $('talk').checked, $('talk').checked ? 'You talk through the bot' : $('show').checked ? "The bot's window shows" : 'The bot works out of sight'));
     items.push(item(true, `Joins as "${$('name').value.trim() || 'Recorder'}"`));
+    if (account) items.push(item(account.signedIn, account.signedIn ? 'Signed in to Google' : 'Not signed in to Google: More, then Sign the bot in', !account.signedIn));
   }
   if (whisper) items.push(item(whisper.available, whisper.available ? 'Transcriber ready' : 'Transcriber needs its model', !whisper.available));
   $('readiness').replaceChildren(...items);
@@ -1346,7 +1347,8 @@ async function loadStorage() {
 function showUpdate(u) {
   update = u;
   const busy = u.status === 'checking' || u.status === 'updating' || u.status === 'updated';
-  const label = u.status === 'available' ? 'Update now' : 'Check for updates';
+  // the installed app is updated by installing the new version: the button opens its download page
+  const label = u.status === 'available' ? (u.packaged ? 'Download the new version' : 'Update now') : 'Check for updates';
   const text = u.status === 'checking' ? 'Checking…'
     : u.status === 'available' ? 'A new version is ready' + (u.latest && u.latest.message ? `: ${u.latest.message}` : '')
       : u.status === 'updating' ? 'Updating…'
@@ -1385,14 +1387,29 @@ $('updateBtn2').addEventListener('click', updateClick);
 
 // ---------- the More menu ----------
 $('openRecordings').addEventListener('click', () => api('/api/storage/open', { which: 'recordings' }).catch((e) => toast(e.message)));
+// the bot's Google sign-in happens in the app: a window opens on the bot's own browser, you sign in and close it
+var account = null; // var: read by renderReadiness, which can run before this line
+async function loadAccount() {
+  try { account = await fetch('/api/account').then((r) => r.json()); } catch { return; }
+  $('loginText').textContent = account.signedIn ? (account.email ? `Bot signed in as ${account.email}` : 'Bot signed in to Google') : 'Sign the bot in to Google';
+  $('loginNote').textContent = account.signedIn ? 'Click to sign in with another account.' : 'Google lets the bot into meetings only when it is signed in.';
+  renderReadiness();
+}
 $('loginBtn').addEventListener('click', async () => {
   try {
     await api('/api/login');
     toast('Sign in in the window that opened, then close it.');
+    // notice the sign-in as soon as it happens
+    let n = 0;
+    const t = setInterval(async () => {
+      await loadAccount();
+      if ((account && account.signedIn) || ++n > 60) clearInterval(t);
+    }, 5000);
   } catch (e) {
     toast(e.message);
   }
 });
+$('appMenu').addEventListener('toggle', () => $('appMenu').open && loadAccount());
 // the Mac app has no window of its own: this ends it
 $('quitBtn').addEventListener('click', async () => {
   try {
@@ -1487,4 +1504,5 @@ loadRecordings().then(() => {
   showTx(tx);
 });
 loadWhisper();
+loadAccount();
 requestAnimationFrame(frame);

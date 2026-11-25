@@ -12,3 +12,5 @@ models/
 .claude/
 installer/*.zip
 .DS_Store
+dist/
+packaging/icon-1024.png

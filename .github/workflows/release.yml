@@ -1,0 +1,103 @@
+# Builds the ICAIRE Echo installers on clean machines, installs each one there and checks that the installed
+# app starts and finds its own transcriber, then (for a tag v<version>) publishes them as a GitHub release.
+# Run by hand (Actions › release › Run workflow) to only build and test.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build the app and the disk image
+        run: bash packaging/mac/build.sh
+      - name: Install from the disk image, start it, check it, quit it
+        env:
+          PORT: '4788'
+          MRB_NO_AUTO_UPDATE: '1'
+        run: |
+          DMG=$(ls dist/ICAIRE-Echo-*-mac.dmg)
+          echo "disk image: $DMG ($(stat -f%z "$DMG") bytes)"
+          MNT=$(hdiutil attach -nobrowse -noautoopen "$DMG" | grep -o '/Volumes/.*' | tail -1)
+          ditto "$MNT/ICAIRE Echo.app" "/Applications/ICAIRE Echo.app"
+          hdiutil detach -quiet "$MNT"
+          "/Applications/ICAIRE Echo.app/Contents/MacOS/ICAIRE Echo"
+          for i in $(seq 1 60); do curl -fs -o /dev/null "http://localhost:$PORT/api/state" && break; sleep 1; done
+          curl -fs "http://localhost:$PORT/api/state" > /dev/null
+          curl -fs "http://localhost:$PORT/api/whisper" | tee whisper.json
+          node -e "const w=require('./whisper.json'); if (!/ICAIRE Echo\.app\/Contents\/Resources\/app\/bin\/whisper-cli$/.test(w.engine||'')) { console.error('the transcriber inside the app was not found'); process.exit(1) }"
+          test -d "$HOME/Library/Application Support/ICAIRE Echo"
+          curl -fs -X POST -H 'x-mrb: 1' -H 'content-type: application/json' -d '{}' "http://localhost:$PORT/api/quit"
+          sleep 2
+          ! curl -fs -o /dev/null "http://localhost:$PORT/api/state"
+          cat "$HOME/Library/Logs/ICAIRE Echo/echo.log"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: icaire-echo-mac
+          path: dist/ICAIRE-Echo-*-mac.dmg
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+      - name: Build the installer
+        shell: pwsh
+        run: ./packaging/windows/build.ps1
+      - name: Install it, start it, check it, quit it
+        shell: pwsh
+        run: |
+          $exe = (Get-ChildItem dist\ICAIRE-Echo-*-windows-setup.exe).FullName
+          Write-Host "installer: $exe ($((Get-Item $exe).Length) bytes)"
+          Start-Process $exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          $app = "$env:LOCALAPPDATA\Programs\ICAIRE Echo"
+          if (-not (Test-Path "$app\node.exe")) { throw 'not installed' }
+          $env:ECHO_DATA = "$env:RUNNER_TEMP\echo-data"; $env:ECHO_PACKAGED = '1'; $env:PORT = '4788'; $env:MRB_NO_AUTO_UPDATE = '1'
+          $p = Start-Process "$app\node.exe" -ArgumentList 'server.js', '--no-open' -WorkingDirectory "$app\app" -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 60 -and -not $ok; $i++) { try { Invoke-WebRequest -UseBasicParsing http://localhost:4788/api/state | Out-Null; $ok = $true } catch { Start-Sleep 1 } }
+          if (-not $ok) { throw 'the app did not start' }
+          $w = Invoke-RestMethod http://localhost:4788/api/whisper
+          Write-Host "transcriber: $($w.engine)"
+          if ($w.engine -notlike "*ICAIRE Echo\app\bin\*whisper-cli.exe") { throw 'the transcriber inside the app was not found' }
+          Invoke-WebRequest -UseBasicParsing -Method Post -Headers @{ 'x-mrb' = '1' } http://localhost:4788/api/quit | Out-Null
+          Start-Sleep 2
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          Start-Process "$app\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait
+          if (Test-Path "$app\node.exe") { throw 'the uninstaller left the app behind' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: icaire-echo-windows
+          path: dist/ICAIRE-Echo-*-windows-setup.exe
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [mac, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" out/* --repo "${GITHUB_REPOSITORY}" --title "ICAIRE Echo ${GITHUB_REF_NAME#v}" \
+            --notes "Download the installer for your computer: the .dmg for a Mac (Apple silicon), the setup .exe for Windows. See the README for the first launch."

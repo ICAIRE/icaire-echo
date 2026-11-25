@@ -1,6 +1,6 @@
 # To do
 
-Planned work for Meet Recorder, in suggested order. Nothing here is built yet unless marked **Done**.
+Planned work for ICAIRE Echo, in suggested order. Nothing here is built yet unless marked **Done**.
 Research notes and sources are under each item (checked 22 Nov 2026).
 
 **Priority: the Record button.** Items 1 and 2 are about pressing **Record** (no bot): hear

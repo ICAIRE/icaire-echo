@@ -1,12 +1,11 @@
 {
-  "name": "meet-recorder-bot",
+  "name": "icaire-echo",
   "version": "1.0.0",
-  "description": "Local team app: a Google Meet recorder with named transcripts, and AI voice-over with Kokoro.",
+  "description": "ICAIRE Echo: record meetings and get transcripts with names, and make voice-overs, all on your own computer.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "record": "node bot.js",
-    "login": "node login.js",
     "merge": "node merge.js",
     "demo": "node test/ui-demo-server.js",
     "test": "node --test --test-concurrency=1 test/*.test.js",
@@ -15,7 +14,9 @@
     "test:ui": "node --test test/ui.test.js",
     "test:whisper": "node --test test/whisper.test.js",
     "test:voice": "node --test test/voice.test.js",
-    "setup": "node setup.js"
+    "setup": "node setup.js",
+    "build:mac": "bash packaging/mac/build.sh",
+    "build:windows": "powershell -ExecutionPolicy Bypass -File packaging/windows/build.ps1"
   },
   "dependencies": {
     "@echogarden/espeak-ng-emscripten": "^0.3.5",
@@ -29,5 +30,9 @@
   "private": true,
   "engines": {
     "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ICAIRE/icaire-echo.git"
   }
 }
