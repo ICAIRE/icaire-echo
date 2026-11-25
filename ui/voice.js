@@ -7,7 +7,10 @@ const VO = {
   preset: 'presenter',
   changes: {}, // flat "a.b" -> value, on top of the preset
   job: null,
-  lastDone: null,
+  engine: 'standard',
+  expressive: { lang: 'en', voice: 'heart', intensity: 0.5 },
+  catalog: null, // /api/expressive
+  setup: null,
   audio: null, // the sample player
 };
 
@@ -39,7 +42,7 @@ function setVal(k, v) {
   renderAll();
 }
 function save() {
-  try { localStorage.setItem('mrb.vo', JSON.stringify({ preset: VO.preset, changes: VO.changes, text: $('voText').value })); } catch {}
+  try { localStorage.setItem('mrb.vo', JSON.stringify({ engine: VO.engine, expressive: VO.expressive, preset: VO.preset, changes: VO.changes, text: $('voText').value })); } catch {}
 }
 
 // ---------- voices ----------
@@ -63,15 +66,22 @@ function effectiveLang() {
   return l && l !== 'auto' ? l : langOf(val('voice')).code;
 }
 
-async function playSample(btn, body) {
-  if (VO.audio && !VO.audio.paused && btn.dataset.playing) {
+async function playSample(btn, body, endpoint) {
+  if (VO.audio && !VO.audio.paused && btn.hasAttribute('data-playing')) {
     VO.audio.pause();
     return;
   }
-  document.querySelectorAll('[data-playing]').forEach((b) => { delete b.dataset.playing; b.setAttribute('aria-label', b.dataset.label); });
+  if (btn.hasAttribute('data-loading')) return;
+  const request = ++sampleRequest;
+  VO.audio?.pause();
+  document.querySelectorAll('.voice-row [data-playing]').forEach((b) => { delete b.dataset.playing; b.setAttribute('aria-label', b.dataset.label); });
   btn.dataset.loading = '';
+  btn.setAttribute('aria-busy', 'true');
+  btn.setAttribute('aria-label', 'Preparing the sample');
+  $('voError').textContent = '';
   try {
-    const r = await api('/api/voice/sample', body);
+    const r = await api(endpoint, body);
+    if (request !== sampleRequest || !btn.isConnected) return;
     if (!VO.audio) VO.audio = new Audio();
     VO.audio.src = r.url;
     VO.audio.onended = VO.audio.onpause = () => { delete btn.dataset.playing; btn.setAttribute('aria-label', btn.dataset.label); };
@@ -82,28 +92,32 @@ async function playSample(btn, body) {
     $('voError').textContent = e.message;
   } finally {
     delete btn.dataset.loading;
+    btn.removeAttribute('aria-busy');
+    if (!btn.hasAttribute('data-playing')) btn.setAttribute('aria-label', btn.dataset.label);
   }
 }
-function playButton(label, body) {
+let sampleRequest = 0;
+function playButton(label, body, endpoint = '/api/voice/sample') {
   const b = el('button', { class: 'play', type: 'button', 'aria-label': label, 'data-label': label, title: label });
   b.append(el('span', { class: 'play-icon', 'aria-hidden': 'true' }));
   b.addEventListener('click', (e) => {
     e.stopPropagation();
-    playSample(b, body());
+    playSample(b, body(), endpoint);
   });
   return b;
 }
 
 // One list for the language chosen on top: the recommended voices first. Search narrows it.
-function voiceRow({ on, name, tag, about, sample, pick, key }) {
-  const row = el('li', { class: 'voice-row' + (on ? ' on' : ''), role: 'radio', 'aria-checked': String(on), tabindex: on ? '0' : '-1', 'data-key': key });
+function voiceRow({ on, name, tag, about, sample, pick, key, endpoint }) {
+  const row = el('li', { class: 'voice-row' + (on ? ' on' : ''), role: 'radio', title: name + ' · ' + about, 'aria-checked': String(on), tabindex: on ? '0' : '-1', 'data-key': key });
   row.append(
-    el('span', { class: 'led', 'aria-hidden': 'true' }),
-    el('span', { class: 'voice-text' }, el('span', { class: 'voice-name' }, name, tag ? el('span', { class: 'voice-tag' }, tag) : null), el('span', { class: 'voice-about' }, about)),
-    playButton('Play a sample of ' + name, sample)
+    icon('waves'),
+    el('span', { class: 'voice-text' }, el('span', { class: 'voice-name' }, name, tag ? el('span', { class: 'voice-tag', title: tag, 'aria-label': tag }, icon('check')) : null), el('span', { class: 'voice-about' }, about)),
+    ...(sample ? [playButton('Play a sample of ' + name, sample, endpoint)] : [])
   );
   row.addEventListener('click', pick);
   row.addEventListener('keydown', (e) => {
+    if (e.target !== row) return;
     if (e.key === 'Enter' || e.key === ' ') (e.preventDefault(), pick());
     else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
@@ -122,12 +136,8 @@ function renderVoiceList() {
   pace.value = VO.preset;
   $('voPacingAbout').textContent = presetOf(VO.preset).about;
   // the language menu: starts at the chosen voice's language
-  const sel = $('voLangPick');
-  if (!sel.options.length) {
-    sel.replaceChildren(...VO.info.languages.filter((l) => VO.info.voices.some((v) => v.id[0] === l.prefix)).map((l) => el('option', { value: l.code }, l.name)));
-    sel.value = langOf(val('voice')).code;
-  }
-  const lang = VO.info.languages.find((l) => l.code === sel.value) || langOf(val('voice'));
+  languageOptions(VO.info.languages.filter((l) => VO.info.voices.some((v) => v.id[0] === l.prefix)), langOf(val('voice')).code);
+  const lang = langOf(val('voice'));
   const rows = [];
   // Kokoro's voices by their own names, the clearest first
   const list = VO.info.voices.filter((v) => v.id[0] === lang.prefix).sort((x, y) => (y.best ? 1 : 0) - (x.best ? 1 : 0));
@@ -138,7 +148,7 @@ function renderVoiceList() {
       on: val('voice') === v.id,
       name: v.name,
       tag: v.best ? 'Recommended' : '',
-      about: `${sex} · ${lang.name} · ${v.id}`,
+      about: `${sex} · ${v.id}`,
       sample: () => ({ preset: VO.preset, changes: nest({ ...VO.changes, voice: v.id, lang: 'auto' }) }),
       pick: () => {
         delete VO.changes.lang;
@@ -153,16 +163,15 @@ function renderVoiceList() {
     VO.listShown = true;
     on.scrollIntoView({ block: 'nearest' });
   }
-  $('voChosen').textContent = chosenName(VO.preset, val('voice'));
+
 }
 function filterVoices() {
   const q = $('voSearch').value.trim().toLowerCase();
-  let any = false;
-  for (const li of $('voVoices').children) {
-    li.hidden = !!q && !li.dataset.key.toLowerCase().includes(q);
-    if (!li.hidden) any = true;
-  }
-  $('voNone').hidden = any;
+  const rows = [...$('voVoices').children];
+  for (const row of rows) row.hidden = !!q && !row.dataset.key.toLowerCase().includes(q);
+  const first = rows.find(row => !row.hidden && row.classList.contains('on')) || rows.find(row => !row.hidden);
+  $('voNone').hidden = !!first;
+  for (const row of rows) row.tabIndex = row === first ? 0 : -1;
 }
 
 // ---------- advanced ----------
@@ -347,10 +356,11 @@ function renderCount() {
   const t = $('voText').value.trim();
   const said = t.replace(/\[[^\]]*\]/g, ' ').trim(); // tags are not words
   const words = said ? said.split(/\s+/).length : 0;
-  const speed = Number(val('speed')) || 1;
+  const speed = VO.info && !isExpressive() ? Number(val('speed')) || 1 : 1;
   const sec = (words / (150 * (speed / 0.94))) * 60; // the presentation runs about 140-150 words a minute at 0.94
-  $('voCount').textContent = words ? `${plural(words, 'word')} · about ${length(Math.max(1, sec))}` : '';
-  if (VO.info && VO.info.presets) $('voSummary').textContent = `${chosenName(VO.preset, val('voice'))}${words ? ` · about ${length(Math.max(1, sec))}` : ''}`;
+  $('voCount').textContent = words ? `${plural(words, 'word')} · about ${length(Math.max(1, sec))}` : '0 words';
+  updateCreateButton();
+
 }
 
 // Japanese and Chinese need a language pack once (Kokoro's own pronunciation rules)
@@ -361,12 +371,12 @@ function extraKeyFor(lang) {
 }
 function renderExtra(state) {
   const box = $('voExtra');
+  if (isExpressive()) { box.hidden = true; return; }
   const key = extraKeyFor(effectiveLang());
   const s = state || VO.extraState;
   const busy = !!(s && s.status === 'running');
   box.hidden = !key && !busy;
-  const blocking = !!extraKeyFor(effectiveLang());
-  $('voGo').disabled = blocking || !!(VO.job && ['loading', 'running', 'encoding'].includes(VO.job.status)) || document.body.hasAttribute('data-vo-locked');
+  updateCreateButton();
   if (box.hidden) return;
   const k = busy ? s.key : key;
   const x = VO.info.extras[k];
@@ -389,9 +399,35 @@ function renderExtra(state) {
 
 function renderAll() {
   if (!VO.info || !VO.info.presets) return;
-  renderVoiceList();
+  const expressive = isExpressive();
+  document.querySelectorAll('#voPanel [data-engine]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.engine === VO.engine)));
+  $('voEngineText').textContent = expressive ? 'Expressive' : 'Standard';
+  $('voStandard').hidden = expressive;
+  $('voInstall').hidden = !expressive || !!VO.catalog?.installed;
+  $('voPicker').hidden = expressive && !VO.catalog?.installed;
+  $('voAdd').hidden = !expressive;
+  $('voStrength').hidden = !expressive || !expressiveLanguage()?.intensity;
+  $('voSearch').parentElement.hidden = expressive && (VO.catalog?.voices.length || 0) <= 6;
+  $('voVoiceCaption').textContent = expressive ? 'Available voices' : 'Ready voices';
+  $('voInsert').disabled = expressive && !VO.catalog?.installed;
+  $('voGo').hidden = expressive && !VO.catalog?.installed;
+  renderSetup(VO.standardSetup);
   renderExtra();
-  renderAdvanced();
+  if (expressive) {
+    renderDownload();
+    if (VO.catalog?.installed) renderExpressiveVoices();
+    $('voText').dir = expressiveLanguage()?.rtl ? 'rtl' : 'ltr';
+    $('voText').lang = VO.expressive.lang;
+    $('voSummary').textContent = VO.catalog?.installed
+      ? [VO.catalog.voices.find(v => v.id === VO.expressive.voice)?.name, expressiveLanguage()?.name].filter(Boolean).join(' · ')
+      : VO.catalog ? 'Expressive needs a download' : '';
+  } else {
+    renderVoiceList();
+    renderAdvanced();
+    $('voSummary').textContent = chosenName(VO.preset, val('voice'));
+    $('voText').dir = 'auto';
+    $('voText').removeAttribute('lang');
+  }
   renderCount();
 }
 
@@ -401,7 +437,7 @@ function renderSetup(setup) {
   const i = VO.info;
   const needsModel = i && i.needs && i.needs.includes('model');
   const needsEngine = i && i.needs && i.needs.includes('engine');
-  box.hidden = !(needsModel || needsEngine);
+  box.hidden = isExpressive() || !(needsModel || needsEngine);
   document.body.toggleAttribute('data-vo-locked', !box.hidden);
   if (box.hidden) return;
   const [n, u] = bytes(i.downloadBytes);
@@ -426,20 +462,22 @@ function renderJob(j) {
   const prog = $('voProg');
   const active = j && !j.sample && ['loading', 'running', 'encoding'].includes(j.status);
   prog.hidden = !active;
-  $('voGo').disabled = !!active || document.body.hasAttribute('data-vo-locked') || !!extraKeyFor(effectiveLang());
+  $('voSummary').hidden = !!active;
   if (active) {
     $('voPct').textContent = j.status === 'loading' ? '…' : Math.floor(j.percent) + '%';
-    $('voLabel').textContent =
-      j.status === 'loading' ? 'Starting the voice…' : j.status === 'encoding' ? 'Saving the file…' : `Reading line ${j.done} of ${j.total}` + (j.etaSec != null ? ` · about ${mmss(j.etaSec)} left` : '');
+    const phase = j.status === 'loading' ? 'Starting the voice…'
+      : j.status === 'encoding' ? 'Saving the file…' : `Reading line ${j.done} of ${j.total}`;
+    $('voLabel').textContent = phase + (j.etaSec != null ? ` · about ${mmss(j.etaSec)} left` : '');
+    $('voBar').parentElement.setAttribute('aria-valuenow', Math.floor(j.percent || 0));
     $('voBar').style.transform = j.status === 'loading' ? '' : `scaleX(${(j.percent / 100).toFixed(4)})`;
     prog.dataset.phase = j.status;
   }
   const prev = VO.job;
   VO.job = j;
+  updateCreateButton();
   if (!j || j.sample) return;
   if (j.status === 'done' && (!prev || prev.status !== 'done' || prev.id !== j.id)) {
-    showResult(j);
-    loadVoiceovers();
+    if (VO.info) loadVoiceovers(j.id);
   }
   if (j.status === 'error' && (!prev || prev.status !== 'error')) showError(j.error);
 }
@@ -458,10 +496,24 @@ function downloads(id, files) {
 
 function showResult(j) {
   const box = $('voResult');
-  const main = j.result.files.find((f) => f !== 'voice.wav') || 'voice.wav';
-  $('voPlayer').replaceChildren(meterPlayer(`/vo/${j.id}/${main}`, j.result.duration));
-  $('voResultMeta').textContent = `${length(j.result.duration)} · ${chosenName(j.preset || VO.preset, j.voice || val('voice'))}`;
-  $('voResultAct').replaceChildren(...downloads(j.id, j.result.files), el('button', { class: 'small', type: 'button', 'data-open-folder': '', onclick: () => api('/api/vo-open/' + j.id).catch(() => {}) }, typeof SHOW_IN !== 'undefined' ? SHOW_IN : 'Open folder'));
+  playing?.pause();
+  const files = j.files.map(f => f.name);
+  const main = files.find(f => f !== 'voice.wav') || 'voice.wav';
+  $('voPlayer').replaceChildren(meterPlayer(`/vo/${j.id}/${main}`, j.duration));
+  $('voResultMeta').textContent = `${length(j.duration)} · ${takeVoice(j)}`;
+  $('voResultAct').replaceChildren(...downloads(j.id, j.files),
+    el('button', { class: 'small', type: 'button', title: SHOW_IN, 'aria-label': SHOW_IN, onclick: () => api('/api/vo-open/' + j.id).catch(e => toast(e.message)) }, icon('files')),
+    el('button', { class: 'small quiet-danger', type: 'button', title: 'Delete', 'aria-label': 'Delete this voice-over', onclick: async () => {
+      if (!await confirmBox({ title: 'Delete this voice-over?', text: 'Its sound files and script are removed from this computer.', ok: 'Delete' })) return;
+      try {
+        await api('/api/vo-delete/' + j.id);
+        playing?.pause();
+        box.hidden = true;
+        loadVoiceovers();
+      } catch (e) { toast(e.message); }
+    } }, icon('trash')));
+  box.title = j.preview;
+  box.dataset.id = j.id;
   box.hidden = false;
 }
 
@@ -470,7 +522,7 @@ function showError(raw) {
   const plain = /needs one more download/.test(raw || '')
     ? raw
     : /not downloaded/.test(raw || '')
-      ? 'The voices are not on this computer yet. Press "Download the voices" at the top of this page, then try again.'
+      ? 'The voices are not on this computer yet. Press "Download the voices" in the voice panel, then try again.'
       : /not installed/.test(raw || '')
         ? 'The voice engine is not installed on this computer yet. Close this window, open the app again with "ICAIRE Echo" (it installs it), then try again.'
         : 'The voice-over could not be made. Try again; if it keeps happening, try a shorter script or another voice.';
@@ -486,20 +538,63 @@ async function create() {
     $('voText').focus();
     return;
   }
+  VO.audio?.pause();
+  playing?.pause();
   $('voResult').hidden = true;
-  $('voGo').disabled = true;
+  highlightTake();
+  ++sampleRequest;
+  VO.submitting = true;
+  updateCreateButton();
   try {
-    const j = await api('/api/voice/generate', { text, preset: VO.preset, changes: nest(VO.changes) });
-    j.voice = val('voice');
+    const changes = nest(VO.changes);
+    if (isExpressive()) Object.assign(changes, { engine: VO.engine, expressive: { ...VO.expressive } });
+    const j = await api('/api/voice/generate', { text, preset: VO.preset, changes });
     renderJob(j);
   } catch (e) {
-    showError(e.message);
-    $('voGo').disabled = false;
+    if (isExpressive() && /not downloaded/.test(e.message)) await refreshExpressive();
+    $('voError').textContent = e.message;
+  } finally {
+    VO.submitting = false;
+    updateCreateButton();
   }
 }
 
 // ---------- player: the console's meter window instead of the browser's grey audio bar ----------
 let playing = null;
+const waveformCache = new Map();
+function takePeaks(url) {
+  if (!waveformCache.has(url)) {
+    const decode = async () => {
+      const buf = await fetch(url).then((r) => r.arrayBuffer());
+      const ctx = new (window.OfflineAudioContext || window.AudioContext)(1, 1, 24000);
+      const data = (await ctx.decodeAudioData(buf)).getChannelData(0);
+      const n = 400;
+      const step = Math.max(1, Math.floor(data.length / n));
+      const peaks = Array.from({ length: n }, (_, i) => {
+        let s = 0;
+        for (let j = i * step; j < Math.min(data.length, (i + 1) * step); j++) s += data[j] * data[j];
+        return Math.sqrt(s / step);
+      });
+      const top = Math.max(...peaks) || 1;
+      return peaks.map((x) => x / top);
+    };
+    waveformCache.set(url, decode().catch(() => []));
+  }
+  return waveformCache.get(url);
+}
+const takeObserver = new IntersectionObserver(entries => {
+  for (const entry of entries) {
+    if (!entry.isIntersecting) continue;
+    const button = entry.target;
+    takeObserver.unobserve(button);
+    takePeaks(button.dataset.audio).then(peaks => {
+      if (button.isConnected) {
+        button.querySelector('.wave-graphic').replaceWith(waveGraphic({ peaks: peaks.filter((_, i) => i % 6 === 0) }));
+      }
+    });
+  }
+});
+
 function meterPlayer(url, duration) {
   const audio = new Audio();
   audio.preload = 'none';
@@ -514,18 +609,7 @@ function meterPlayer(url, duration) {
     if (peaks || loading) return;
     loading = true;
     try {
-      const buf = await fetch(url).then((r) => r.arrayBuffer());
-      const ctx = new (window.OfflineAudioContext || window.AudioContext)(1, 1, 24000);
-      const data = (await ctx.decodeAudioData(buf)).getChannelData(0);
-      const n = 400;
-      const step = Math.max(1, Math.floor(data.length / n));
-      peaks = Array.from({ length: n }, (_, i) => {
-        let s = 0;
-        for (let j = i * step; j < Math.min(data.length, (i + 1) * step); j++) s += data[j] * data[j];
-        return Math.sqrt(s / step);
-      });
-      const top = Math.max(...peaks) || 1;
-      peaks = peaks.map((x) => x / top);
+      peaks = await takePeaks(url);
     } catch {
       peaks = [];
     }
@@ -566,10 +650,12 @@ function meterPlayer(url, duration) {
   const setIcon = () => {
     btn.toggleAttribute('data-playing', !audio.paused);
     btn.setAttribute('aria-label', audio.paused ? 'Play' : 'Pause');
+    highlightTake();
   };
   btn.addEventListener('click', () => {
     if (audio.paused) {
       if (playing && playing !== audio) playing.pause();
+      VO.audio?.pause();
       playing = audio;
       load();
       audio.play().catch(() => {});
@@ -598,48 +684,53 @@ function meterPlayer(url, duration) {
 }
 
 // ---------- history ----------
-async function loadVoiceovers() {
-  const list = await fetch('/api/voiceovers').then((r) => r.json()).catch(() => []);
+async function loadVoiceovers(resultId) {
+  let list;
+  try {
+    const r = await fetch('/api/voiceovers');
+    if (!r.ok) throw new Error('Could not load your voice-overs.');
+    list = await r.json();
+  } catch (e) {
+    $('voError').textContent = e.message;
+    return;
+  }
+  takeObserver.disconnect();
+  const result = list.find(v => v.id === resultId);
+  if (result) showResult(result);
   $('voEmpty').hidden = list.length > 0;
   $('voList').replaceChildren(
     ...list.map((v) => {
       const when = new Date(v.id.replace(/^(\d{4}-\d\d-\d\d)-(\d\d)-(\d\d)-(\d\d)(?:-\d+)?$/, '$1T$2:$3:$4Z'));
-      const main = (v.files.find((f) => f.name !== 'voice.wav') || v.files[0]).name;
-      const li = el('li', { class: 'vo-item' });
-      li.append(
-        el(
-          'div',
-          { class: 'vo-item-top' },
-          el('div', { class: 'vo-item-title' }, el('h3', {}, isNaN(when) ? v.id : when.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })), el('div', { class: 'rec-facts' }, [length(v.duration), chosenName(v.preset, v.voice), plural(v.words, 'word')].filter(Boolean).join(' · '))),
-          meterPlayer(`/vo/${v.id}/${main}`, v.duration)
-        ),
-        el('p', { class: 'vo-item-text', dir: 'auto' }, v.preview + (v.preview.length >= 240 ? '…' : '')),
-        el(
-          'div',
-          { class: 'rec-actions' },
-          ...downloads(v.id, v.files),
-          el('button', { class: 'small icon-only', type: 'button', title: SHOW_IN, 'aria-label': SHOW_IN, onclick: () => api('/api/vo-open/' + v.id).catch(() => {}) }, icon('files')),
-          el('button', {
-            class: 'small quiet-danger icon-only vo-del',
-            type: 'button',
-            title: 'Delete',
-            'aria-label': 'Delete this voice-over',
-            onclick: async () => {
-              const sure = await confirmBox({ title: 'Delete this voice-over?', text: 'Its sound files and script are removed from this computer. This cannot be undone.', ok: 'Delete' });
-              if (!sure) return;
-              try {
-                await api('/api/vo-delete/' + v.id);
-              } catch (err) {
-                toast(err.message);
-              }
-              loadVoiceovers();
-            },
-          }, icon('trash'))
-        )
-      );
+      const title = v.preview.replace(/\[[^\]]*\]/g, '').trim() || v.id;
+      const file = v.files.find(f => f.name !== 'voice.wav') || v.files[0];
+      const facts = `${takeVoice(v)} · ${mmss(v.duration)}`;
+      const btn = el('button', { class: 'vo-take', type: 'button', title: `${when.toLocaleString()} · ${facts} · ${plural(v.words, 'word')}\n${v.preview}`, 'data-id': v.id, 'data-audio': `/vo/${v.id}/${file.name}` },
+        el('strong', { dir: 'auto' }, title), icon('play'), el('small', {}, facts), waveGraphic(null));
+      takeObserver.observe(btn);
+      btn.onclick = () => {
+        if ($('voResult').hidden || $('voResult').dataset.id !== v.id) showResult(v);
+        $('voPlayer').querySelector('button').click();
+        highlightTake();
+      };
+      const li = el('li', {}, btn);
       return li;
     })
   );
+  highlightTake();
+}
+
+function takeVoice(v) {
+  return v.engine === 'expressive' ? v.voiceName : chosenName(v.preset, v.voice);
+}
+function highlightTake() {
+  for (const button of $('voList').querySelectorAll('.vo-take')) {
+    const selected = !$('voResult').hidden && button.dataset.id === $('voResult').dataset.id;
+    const action = selected && playing && !playing.paused ? 'pause' : 'play';
+    const glyph = button.querySelector('svg.i');
+    if (!glyph.classList.contains('i-' + action)) glyph.replaceWith(icon(action));
+    button.setAttribute('aria-current', String(selected));
+    button.setAttribute('aria-label', (action === 'play' ? 'Play ' : 'Pause ') + button.querySelector('strong').textContent);
+  }
 }
 
 // ---------- start ----------
@@ -655,19 +746,21 @@ async function loadVoice() {
     if (s) {
       if (VO.info.presets.some((p) => p.id === s.preset)) VO.preset = s.preset;
       VO.changes = s.changes || {};
+      VO.engine = s.engine === 'expressive' ? 'expressive' : 'standard';
+      Object.assign(VO.expressive, s.expressive);
       if (s.text && !$('voText').value) $('voText').value = s.text;
     }
   } catch {}
   renderSetup(null);
   renderAll();
-  window.dispatchEvent(new Event('vo-info'));
-  loadVoiceovers();
+  loadVoiceovers(VO.job?.status === 'done' && VO.job.id);
+  refreshExpressive();
 }
 
 $('voText').addEventListener('input', () => {
+  $('voError').textContent = '';
   renderCount();
-  clearTimeout(VO.saveT);
-  VO.saveT = setTimeout(save, 400);
+  save();
 });
 $('voGo').addEventListener('click', create);
 $('voSearch').addEventListener('input', filterVoices);
@@ -682,7 +775,18 @@ $('voPacing').addEventListener('change', () => {
 });
 $('voLangPick').addEventListener('change', () => {
   $('voSearch').value = '';
-  renderVoiceList();
+  closeTags();
+  VO.audio?.pause();
+  if (isExpressive()) {
+    VO.expressive.lang = $('voLangPick').value;
+    save();
+    renderAll();
+  } else {
+    const lang = VO.info.languages.find(l => l.code === $('voLangPick').value);
+    const voices = VO.info.voices.filter(v => v.id[0] === lang.prefix);
+    delete VO.changes.lang;
+    setVal('voice', (voices.find(v => v.best) || voices[0]).id);
+  }
   $('voVoices').scrollTop = 0;
 });
 $('voCancel').addEventListener('click', () => api('/api/voice/cancel').catch(() => {}));
@@ -694,7 +798,8 @@ $('voResetAll').addEventListener('click', () => {
 $('voSetupBtn').addEventListener('click', async () => {
   $('voSetupBtn').hidden = true;
   try {
-    renderSetup(await api('/api/voice/setup'));
+    VO.standardSetup = await api('/api/voice/setup');
+    renderSetup(VO.standardSetup);
   } catch (e) {
     $('voSetupText').textContent = e.message;
     $('voSetupBtn').hidden = false;
@@ -704,6 +809,7 @@ $('voSetupBtn').addEventListener('click', async () => {
 // live updates come through app.js's event stream
 window.onVoiceState = (data) => {
   if (data.voiceSetup) {
+    VO.standardSetup = data.voiceSetup;
     renderSetup(data.voiceSetup);
     if (data.voiceSetup.status === 'done' && VO.info && VO.info.needs && VO.info.needs.length) {
       fetch('/api/voice?refresh').then((r) => r.json()).then((i) => { VO.info = i; renderSetup(null); renderAll(); });
@@ -712,73 +818,408 @@ window.onVoiceState = (data) => {
   if (data.voiceExtra) {
     const was = VO.extraState && VO.extraState.status;
     VO.extraState = data.voiceExtra;
-    if (data.voiceExtra.status === 'done' && was !== 'done') fetch('/api/voice').then((r) => r.json()).then((i) => { VO.info = i; renderAll(); });
+    if (VO.info && data.voiceExtra.status === 'done' && was !== 'done') fetch('/api/voice').then((r) => r.json()).then((i) => { VO.info = i; renderAll(); });
     else if (VO.info) renderExtra();
   }
-  if (data.voice) renderJob({ ...data.voice, voice: (VO.job && VO.job.voice) || undefined });
+  if (data.expressiveSetup) applyDownload(data.expressiveSetup);
+  if (data.voice) renderJob(data.voice);
 };
 
 
-// the right column's three panes: Voice, Settings, Your voice-overs
-function showPane(name) {
-  document.querySelectorAll('#voPanel .seg-btn').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.pane === name)));
-  document.querySelectorAll('#voPanel .pane').forEach((p) => (p.hidden = p.dataset.pane !== name));
-  try { localStorage.setItem('mrb.voPane', name); } catch {}
-}
-document.querySelectorAll('#voPanel .seg-btn').forEach((b) => b.addEventListener('click', () => showPane(b.dataset.pane)));
-try { const p = localStorage.getItem('mrb.voPane'); if (p) showPane(p); } catch {}
+// The setup snapshot and the voice job arrive independently on the same event stream.
+const isExpressive = () => VO.engine === 'expressive';
+const expressiveLanguage = () => VO.catalog?.languages.find(l => l.code === VO.expressive.lang);
+const jobActive = () => VO.job && !VO.job.sample && ['loading', 'running', 'encoding'].includes(VO.job.status);
 
-// pause buttons: put "[pause 2s]" where the cursor is
-document.querySelectorAll('.vo-tools [data-pause]').forEach((b) =>
-  b.addEventListener('click', () => {
-    const ta = $('voText');
-    const secs = b.dataset.pause;
-    const at = ta.selectionStart ?? ta.value.length;
-    const end = ta.selectionEnd ?? at;
-    const before = ta.value.slice(0, at);
-    const mark = (before && !/\s$/.test(before) ? ' ' : '') + `[pause ${secs}s]` + ' ';
-    ta.setRangeText(mark, at, end, 'end');
-    ta.focus();
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
-  })
-);
-
-// tags, like ElevenLabs: put in at the cursor ("[angry] "), or around the selected words ("[angry]words[/angry]")
-function putTag(name, arg = '', sound = false) {
-  const ta = $('voText');
-  const a = ta.selectionStart ?? ta.value.length;
-  const b = ta.selectionEnd ?? a;
-  const open = `[${name}${arg ? ' ' + arg : ''}]`;
-  const inner = ta.value.slice(a, b);
-  if (inner && !sound) {
-    const close = `[/${name}]`;
-    ta.setRangeText(open + inner + close, a, b, 'end');
-  } else {
-    const before = ta.value.slice(0, a);
-    ta.setRangeText((before && !/\s$/.test(before) ? ' ' : '') + open + ' ', a, b, 'end');
-  }
-  ta.focus();
-  ta.dispatchEvent(new Event('input', { bubbles: true }));
+function updateCreateButton() {
+  const available = VO.info && (isExpressive() ? VO.catalog?.installed
+    : !document.body.hasAttribute('data-vo-locked') && !extraKeyFor(effectiveLang()));
+  $('voGo').disabled = !available || VO.submitting || jobActive() || !$('voText').value.trim();
 }
-document.querySelectorAll('[data-tag]').forEach((b) => b.addEventListener('click', () => putTag(b.dataset.tag)));
-document.querySelectorAll('[data-sound]').forEach((b) => b.addEventListener('click', () => putTag(b.dataset.sound, '', true)));
-$('voAdjust').addEventListener('change', () => {
-  if ($('voAdjust').value) putTag($('voAdjust').value);
-  $('voAdjust').value = '';
-});
-$('voCharacter').addEventListener('change', () => {
-  if ($('voCharacter').value) putTag('voice', $('voCharacter').value);
-  $('voCharacter').value = '';
-});
-// the voices for "Another voice…", filled once the voice list is known
-window.addEventListener('vo-info', () => {
-  const sel = $('voCharacter');
-  if (sel.options.length > 1 || !VO.info) return;
-  for (const l of VO.info.languages) {
-    const list = VO.info.voices.filter((x) => x.id[0] === l.prefix);
-    if (!list.length) continue;
-    const g = el('optgroup', { label: l.name });
-    for (const x of list) g.append(el('option', { value: x.name }, `${x.name} (${x.id[1] === 'f' ? 'female' : 'male'})`));
-    sel.append(g);
+
+function languageOptions(languages, selected) {
+  const select = $('voLangPick');
+  if (select.dataset.engine !== VO.engine) {
+    select.replaceChildren(...languages.map(l => el('option', { value: l.code }, l.name)));
+    select.dataset.engine = VO.engine;
   }
+  select.value = selected;
+}
+
+async function refreshExpressive() {
+  try {
+    const response = await fetch('/api/expressive');
+    if (!response.ok) throw new Error('Could not load the Expressive voices.');
+    VO.catalog = await response.json();
+    VO.catalogError = null;
+    VO.setup = VO.catalog.setup;
+    const { defaults, voices } = VO.catalog;
+    if (!expressiveLanguage()) VO.expressive.lang = defaults.lang;
+    if (!voices.some(v => v.id === VO.expressive.voice)) VO.expressive.voice = defaults.voice;
+    if (!Number.isFinite(VO.expressive.intensity)) VO.expressive.intensity = defaults.intensity;
+    renderAll();
+  } catch (e) {
+    VO.catalogError = e.message;
+    if (isExpressive()) renderDownload();
+  }
+}
+
+function renderDownload() {
+  if ($('voInstall').hidden) return;
+  const s = VO.setup;
+  const running = s?.status === 'running';
+  const btn = $('voDownload');
+  btn.disabled = !!VO.transferPending || (!VO.catalog && !VO.catalogError);
+  btn.classList.toggle('primary', !running);
+  btn.textContent = !VO.catalog && VO.catalogError ? 'Retry' : running ? 'Cancel download'
+    : ['cancelled', 'error'].includes(s?.status) ? 'Resume download' : 'Download Expressive';
+  $('voTransfer').hidden = !running;
+  $('voTransfer').value = s?.percent || 0;
+  $('voTransferText').textContent = !VO.catalog ? VO.catalogError || 'Checking Expressive…'
+    : running ? `${Math.floor(s.percent)}% of ${bytes(s.total).join(' ')}`
+    : s?.error || (s?.status === 'cancelled' ? 'Download cancelled.' : '');
+}
+
+function applyDownload(snapshot) {
+  const previous = VO.setup?.status;
+  VO.setup = snapshot;
+  if (snapshot.status === 'done' && previous !== 'done' && VO.info) refreshExpressive();
+  else renderDownload();
+}
+
+$('voDownload').onclick = async () => {
+  if (!VO.catalog) return refreshExpressive();
+  VO.transferPending = true;
+  renderDownload();
+  try {
+    const before = VO.setup;
+    const cancel = before?.status === 'running';
+    const response = await api('/api/expressive/setup' + (cancel ? '/cancel' : ''));
+    // A live update can arrive before the response to this button.
+    if (VO.setup === before) applyDownload(response);
+  } catch (e) {
+    $('voError').textContent = e.message;
+  } finally {
+    VO.transferPending = false;
+    renderDownload();
+  }
+};
+
+document.querySelectorAll('#voPanel [data-engine]').forEach(b => {
+  b.onclick = () => {
+    if (!VO.info || VO.engine === b.dataset.engine) return;
+    closeTags();
+    VO.engine = b.dataset.engine;
+    VO.audio?.pause();
+    $('voSearch').value = '';
+    $('voError').textContent = '';
+    save();
+    renderAll();
+  };
 });
+
+// Languages with sample text in voice/expressive.json.
+const sampleLanguages = new Set('en ar fr es de it pt hi tr ru zh ja'.split(' '));
+function renderExpressiveVoices() {
+  languageOptions(VO.catalog.languages, VO.expressive.lang);
+  $('voIntensity').value = VO.expressive.intensity;
+  const hasSample = expressiveLanguage()?.sample ?? sampleLanguages.has(VO.expressive.lang);
+  const rows = VO.catalog.voices.map(v => {
+    const about = v.own ? 'From a recording' : v.about || 'Ready voice';
+    const sample = hasSample ? () => ({ voice: v.id, lang: VO.expressive.lang }) : null;
+    const row = voiceRow({ on: v.id === VO.expressive.voice, name: v.name, key: v.name + ' ' + about, about,
+      sample, endpoint: '/api/expressive/sample', pick: () => {
+        VO.expressive.voice = v.id;
+        save();
+        renderAll();
+        $('voVoices').querySelector('.on')?.focus({ preventScroll: true });
+      } });
+    if (v.own) {
+      row.classList.add('own');
+      row.append(el('button', { type: 'button', class: 'vo-remove', 'aria-label': 'Delete ' + v.name, onclick: async e => {
+        e.stopPropagation();
+        if (!await confirmBox({ title: 'Delete ' + v.name + '?', text: 'This removes the voice from this computer.', ok: 'Delete' })) return;
+        try {
+          const r = await api('/api/expressive/voices/remove', { id: v.id });
+          VO.catalog.voices = r.voices;
+          if (VO.expressive.voice === v.id) VO.expressive.voice = VO.catalog.defaults.voice;
+          save();
+          renderAll();
+          $('voAdd').focus();
+        } catch (error) { $('voError').textContent = error.message; }
+      } }, icon('trash')));
+    }
+    return row;
+  });
+  $('voVoices').replaceChildren(...rows);
+  filterVoices();
+}
+$('voIntensity').oninput = () => {
+  VO.expressive.intensity = Number($('voIntensity').value);
+  save();
+};
+
+// Keep the completed take with the history and playback controls in the rail.
+$('voList').parentElement.append($('voResult'));
+const closeResult = el('button', { type: 'button', class: 'small', 'aria-label': 'Close player', onclick: () => {
+  playing?.pause();
+  $('voResult').hidden = true;
+  highlightTake();
+  [...$('voList').querySelectorAll('button')].find(b => b.dataset.id === $('voResult').dataset.id)?.focus();
+} }, icon('close'));
+$('voResultMeta').after(closeResult);
+
+const sounds = ['Laugh', 'Chuckle', 'Sigh', 'Gasp', 'Cough', 'Groan', 'Sniff', 'Shush', 'Clear throat'];
+const moods = ['Angry', 'Happy', 'Sad', 'Excited', 'Surprised', 'Calm', 'Serious', 'Whisper', 'Shouting', 'Normal'];
+const draft = $('voText');
+const panel = $('voTags');
+let queryStart = null;
+function closeTags() {
+  panel.hidden = true;
+  queryStart = null;
+  $('voInsert').setAttribute('aria-expanded','false');
+}
+function insertTag(group, item) {
+  const start = queryStart ?? draft.selectionStart;
+  const end = draft.selectionEnd;
+  const selected = queryStart === null ? draft.value.slice(start,end) : '';
+  let tag = item.toLowerCase();
+  if (group === 'Pause') tag = 'pause '+item.replace('½','0.5').replace(' ','');
+  if (group === 'Voice') tag = 'voice '+item;
+  const mark = '['+tag+']';
+  const wraps = group === 'Voice' || (selected && group === 'Mood');
+  const text = wraps ? mark+selected+'[/'+tag.split(' ')[0]+']' : mark;
+  closeTags();
+  draft.focus({preventScroll:true});
+  // A point cue goes before highlighted words. A mood or voice surrounds them.
+  const replaceEnd = selected && !wraps ? start : end;
+  const before = draft.value[start-1] || '';
+  const after = draft.value[replaceEnd] || '';
+  const leading = /\S/.test(before) ? ' ' : '';
+  const trailing = /\s/.test(after) ? '' : ' ';
+  draft.setRangeText(leading+text+trailing,start,replaceEnd,'end');
+  if (after===' ') {
+    const caret = draft.selectionEnd+1;
+    draft.setSelectionRange(caret,caret);
+  }
+  if (group === 'Voice' && !selected) {
+    const caret = start + leading.length + mark.length;
+    draft.setSelectionRange(caret, caret);
+  }
+  draft.dispatchEvent(new Event('input',{bubbles:true}));
+}
+function positionTags() {
+  if (panel.hidden) return;
+  const anchor = $('voInsert').getBoundingClientRect();
+  const card = document.querySelector('#viewVoice .script-card').getBoundingClientRect();
+  const width = Math.min(480, card.width-16, innerWidth-16);
+  panel.style.width = width+'px';
+  panel.style.left = Math.max(8,Math.min(innerWidth-width-8,anchor.right-width))+'px';
+  const below = innerHeight-anchor.bottom-12;
+  const above = anchor.top-12;
+  const up = below < panel.scrollHeight+2 && above > below;
+  panel.style.maxHeight = Math.max(80,up ? above : below)+'px';
+  panel.style.top = (up ? anchor.top-panel.offsetHeight-4 : anchor.bottom+4)+'px';
+}
+function openTags(query='') {
+  const soundItems = isExpressive() ? (expressiveLanguage()?.sounds ? sounds : []) : ['Laugh','Sigh','Breath'];
+  const groups = {Pause:['½ s','1 s','2 s','4 s'], Mood:isExpressive() ? [...moods, 'Scared', 'Sarcastic', 'Dramatic', 'Crying'] : moods, Sound:soundItems, Voice:(isExpressive() ? VO.catalog.voices : VO.info.voices).map(v => v.name)};
+  const container = $('voTagGroups');
+  container.replaceChildren();
+  for (const [group,items] of Object.entries(groups)) {
+    const matches = items.filter(item=>(group+' '+item).toLowerCase().includes(query.toLowerCase()));
+    if (!matches.length) continue;
+    const section = document.createElement('section');
+    section.className = 'tag-group';
+    const heading = document.createElement('h3');
+    heading.textContent = group;
+    section.append(heading);
+    for (const item of matches) {
+      const button = document.createElement('button');
+      button.textContent = item;
+      button.onclick = ()=>insertTag(group,item);
+      section.append(button);
+    }
+    container.append(section);
+  }
+  $('voTagHint').textContent = !container.childElementCount ? 'No matching tags' :
+    isExpressive() ? '' : 'Standard approximates moods and sounds.';
+  panel.hidden = false;
+  $('voInsert').setAttribute('aria-expanded','true');
+  positionTags();
+}
+$('voInsert').onclick = ()=>{
+  if (!panel.hidden) { closeTags(); draft.focus(); return; }
+  if (!VO.info) return;
+  openTags();
+  panel.querySelector('button').focus({preventScroll:true});
+};
+draft.addEventListener('input',event=>{
+  if ($('voInsert').disabled || !VO.info || event.isComposing) return;
+  const at = draft.selectionStart-1;
+  if (event.data==='[') queryStart = at;
+  if (queryStart===null) return;
+  const typed = draft.value.slice(queryStart,draft.selectionStart);
+  if (/^\[[^\[\]\n/]*$/.test(typed)) openTags(typed.slice(1));
+  else closeTags();
+});
+document.addEventListener('keydown',event=>{
+  if (panel.hidden || event.isComposing) return;
+  const buttons = [...panel.querySelectorAll('button')];
+  if (event.key==='Escape') {
+    event.preventDefault(); closeTags(); draft.focus({preventScroll:true}); return;
+  }
+  if (event.target===draft) {
+    if (event.key==='Enter' && buttons.length) {
+      event.preventDefault(); buttons[0].click();
+    } else if (event.key==='ArrowDown' && buttons.length) {
+      event.preventDefault(); buttons[0].focus();
+    } else if (['ArrowLeft','ArrowRight','ArrowUp','Home','End','Tab'].includes(event.key)) closeTags();
+    return;
+  }
+  if (!buttons.includes(event.target) || !event.key.startsWith('Arrow')) return;
+  const column = event.target.parentElement;
+  const items = [...column.querySelectorAll('button')];
+  const row = items.indexOf(event.target);
+  const adjacent = event.key==='ArrowRight' ? column.nextElementSibling : column.previousElementSibling;
+  event.preventDefault();
+  if (['ArrowRight','ArrowLeft'].includes(event.key)) {
+    if (adjacent) adjacent.querySelectorAll('button')[Math.min(row,adjacent.childElementCount-2)].focus();
+  } else items[(row+(event.key==='ArrowDown'?1:-1)+items.length)%items.length].focus();
+});
+document.addEventListener('pointerdown',event=>{
+  if (!panel.contains(event.target) && !$('voInsert').contains(event.target)) closeTags();
+});
+document.addEventListener('focusin',event=>{
+  if (event.target===draft && queryStart!==null) return;
+  if (!panel.contains(event.target) && event.target!==$('voInsert')) closeTags();
+});
+window.addEventListener('resize',positionTags);
+document.addEventListener('scroll',positionTags,true);
+
+// Each dialog opening owns its microphone request, tracks and recording.
+const voiceDialog = $('voDialog');
+let clipSession;
+function releaseClip(session) {
+  if (session.recorder?.state === 'recording') session.recorder.stop();
+  session.stream?.getTracks().forEach(track => track.stop());
+  clearInterval(session.timer);
+}
+function clipControls(session) {
+  const busy = session.requesting || session.saving;
+  const recording = session.recorder?.state === 'recording';
+  $('voFile').disabled = busy || recording;
+  const tooShort = recording && Date.now() - session.started < 10000;
+  $('voRecord').disabled = busy || tooShort || !navigator.mediaDevices?.getUserMedia || !window.MediaRecorder;
+  $('voRecord').querySelector('span').textContent = recording ? 'Stop recording' : session.requesting ? 'Opening microphone…' : 'Record with microphone';
+  $('voStore').disabled = busy || recording;
+  $('voDismiss').disabled = !!session.saving;
+}
+function chooseClip(file, description) {
+  clipSession.blob = file;
+  $('voClip').textContent = description;
+  $('voRecordError').textContent = '';
+}
+$('voAdd').onclick = () => {
+  clipSession = {};
+  $('voRecordForm').reset();
+  chooseClip(null, '');
+  $('voTimer').value = '';
+  clipControls(clipSession);
+  voiceDialog.showModal();
+  $('voName').focus();
+};
+voiceDialog.addEventListener('cancel', e => { if (clipSession?.saving) e.preventDefault(); });
+voiceDialog.addEventListener('close', () => {
+  if (clipSession) releaseClip(clipSession);
+  clipSession = null;
+});
+$('voDismiss').onclick = () => voiceDialog.close();
+$('voFile').onchange = e => {
+  const file = e.target.files[0];
+  if (file) chooseClip(file, file.name);
+  $('voTimer').value = '';
+};
+$('voDrop').ondragover = e => e.preventDefault();
+$('voDrop').ondrop = e => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (!file || $('voFile').disabled) return;
+  $('voFile').value = '';
+  $('voTimer').value = '';
+  chooseClip(file, file.name);
+};
+$('voRecord').onclick = async () => {
+  const session = clipSession;
+  if (session.recorder?.state === 'recording') {
+    session.recorder.stop();
+    return;
+  }
+  session.requesting = true;
+  clipControls(session);
+  try {
+    session.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (session !== clipSession || !voiceDialog.open) { releaseClip(session); return; }
+    const recorder = new MediaRecorder(session.stream);
+    const chunks = [];
+    session.recorder = recorder;
+    recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    recorder.onstop = () => {
+      releaseClip(session);
+      if (session !== clipSession || !voiceDialog.open) return;
+      const seconds = Math.min(30, Math.round((Date.now() - session.started) / 1000));
+      chooseClip(new Blob(chunks, { type: recorder.mimeType }), 'Microphone recording · ' + mmss(seconds));
+      $('voTimer').value = '';
+      clipControls(session);
+    };
+    recorder.onerror = e => {
+      releaseClip(session);
+      if (session === clipSession) $('voRecordError').textContent = e.error?.message || 'The microphone stopped recording.';
+    };
+    $('voFile').value = '';
+    chooseClip(null, '');
+    session.started = Date.now();
+    recorder.start();
+    $('voTimer').value = '0:00';
+    session.timer = setInterval(() => {
+      const seconds = Math.floor((Date.now() - session.started) / 1000);
+      if (seconds >= 10 && $('voRecord').disabled) clipControls(session);
+      $('voTimer').value = mmss(seconds);
+      if (seconds >= 30 && recorder.state === 'recording') recorder.stop();
+    }, 200);
+  } catch (e) {
+    releaseClip(session);
+    if (session === clipSession) $('voRecordError').textContent = e.message;
+  } finally {
+    session.requesting = false;
+    if (session === clipSession) clipControls(session);
+  }
+};
+$('voRecordForm').onsubmit = async e => {
+  e.preventDefault();
+  const session = clipSession;
+  if (!session.blob) {
+    $('voRecordError').textContent = 'Choose a file or record your voice first.';
+    return;
+  }
+  session.saving = true;
+  clipControls(session);
+  try {
+    const query = new URLSearchParams({ name: $('voName').value.trim(), consent: $('voConsent').checked ? '1' : '0' });
+    const response = await fetch('/api/expressive/voices?' + query, { method: 'POST', headers: { 'x-mrb': '1' }, body: session.blob });
+    const voice = await response.json();
+    if (!response.ok) throw new Error(voice.error);
+    VO.catalog.voices.push(voice);
+    VO.expressive.voice = voice.id;
+    $('voSearch').value = '';
+    save();
+    renderAll();
+    voiceDialog.close();
+    $('voVoices').querySelector('.on')?.scrollIntoView({ block: 'nearest' });
+  } catch (error) {
+    $('voRecordError').textContent = error.message;
+  } finally {
+    session.saving = false;
+    clipControls(session);
+  }
+};

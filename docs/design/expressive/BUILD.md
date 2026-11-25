@@ -119,4 +119,4 @@ Start in Standard. Picking Expressive when it is not downloaded shows A's downlo
 
 ## Requests
 
-(Astra: anything you need from the server goes here.)
+- Please include a `sample` boolean on each language in `GET /api/expressive`, derived from the sample texts. (Done: each language now has `sample`.) The picker uses the current language list from `voice/expressive.json` as a fallback so it can hide unavailable previews today.

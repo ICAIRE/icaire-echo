@@ -753,3 +753,105 @@ body:not([data-mode='bot']) .meet-link { visibility: hidden; }
 /* the tone toolbar */
 .tone-pick { min-height: 32px; padding: 4px 8px; font-size: 12px; border-radius: 7px; background: var(--side); border-color: var(--edge); }
 .tags-help { font-size: 11px; margin: -2px 0 10px; }
+
+/* Voice engine inspector and script editor, direction A. */
+#voPanel { display: flex; flex-direction: column; gap: 14px; min-width: 0; height: 100%; }
+.vo-heading, .vo-install h2, #voRecordTitle { font-size: 15px; font-weight: 650; }
+.vo-heading { display: flex; align-items: center; gap: 9px; }
+.vo-caption, #voStrength label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 7px; }
+.vo-engine > div { display: flex; gap: 5px; }
+.vo-engine button { flex: 1; min-width: 0; font-size: 12px; min-height: 32px; padding: 5px; }
+.vo-engine [aria-pressed=true], #voPanel .voice-row.on { border-color: var(--lime); background: #1a352f; }
+#voPicker, #voStandard { border-top: 1px solid var(--edge); padding-top: 12px; }
+#voPicker { display: flex; flex-direction: column; min-height: 0; }
+#voPicker .voice-tools { grid-template-columns: minmax(0,1fr); }
+#voVoiceCaption { margin-top: 12px; }
+#voVoices { min-height: 48px; max-height: none; align-content: start; padding: 0; gap: 4px; }
+#voPanel .voice-row { height: 48px; grid-template-columns: 20px minmax(0,1fr) auto; gap: 6px; background-color: var(--card); }
+#voPanel .voice-row.own { grid-template-columns: 20px minmax(0,1fr) auto auto; }
+#voVoices .voice-row > svg { width: 18px; color: var(--muted); }
+#voVoices .voice-row.on > svg { color: var(--lime); }
+.vo-remove { width: 26px; min-height: 30px; padding: 0; }
+#voAdd { margin-top: 8px; white-space: normal; }
+#voStrength { margin-top: 12px; }
+#voStrength input { width: 100%; accent-color: var(--lime); }
+#voStrength div, .vo-metrics { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+#voStandard .switch-help { margin: 5px 0 9px; }
+#voStandard details > summary { cursor: pointer; font-size: 13px; }
+#voStandard { overflow: auto; flex-shrink: 0; max-height: 60%; }
+#voAdvBody { overflow: visible; max-height: none; }
+.vo-install, #voDialog { padding: 16px; background: var(--card); border: 1px solid var(--edge); border-radius: 12px; color: var(--text); }
+.vo-install { display: grid; gap: 9px; font-size: 13px; }
+.vo-install progress { width: 100%; height: 7px; accent-color: var(--lime); }
+#voTransferText { font-size: 12px; color: var(--muted); }
+#viewVoice .script-card { position: relative; padding: 0; background: var(--card); border: 1px solid var(--edge); }
+#viewVoice .script-head { justify-content: space-between; align-items: center; padding: 10px 16px; margin: 0; border-bottom: 1px solid var(--edge); font-size: 15px; font-weight: 650; }
+#viewVoice #voText { flex: 1 1 0; resize: none; min-height: 76px; border: 0; border-radius: 0; color: var(--text); background: var(--field); font-size: 14px; }
+#voText:focus-visible { outline-offset: -3px; }
+.vo-metrics { padding: 10px 16px; border-top: 1px solid var(--edge); }
+#viewVoice .vo-go { min-height: 62px; padding: 0 16px 12px; margin: 0; }
+#viewVoice .vo-go { justify-content: space-between; flex-wrap: nowrap; }
+#voSummary { text-align: end; overflow-wrap: anywhere; }
+#voInsert[aria-expanded=true] { color: var(--lime); border-color: var(--lime); }
+#voTags { display: flex; flex-direction: column; position: fixed; z-index: 10; overflow: auto; padding: 12px; background: var(--card); border: 1px solid var(--field-line); border-radius: 10px; }
+#voTagGroups { min-height: 0; max-height: 390px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0,1fr); }
+#voTags .tag-group { overflow-y: auto; scrollbar-width: thin; min-width: 0; padding-inline: 4px; }
+#voTags .tag-group + .tag-group { border-inline-start: 1px solid var(--edge); }
+#voTags h3 { position: sticky; top: 0; background: var(--card); margin: 2px 6px 7px; font-size: 12px; color: var(--muted); }
+#voTags button { white-space: normal; font-weight: 500; width: 100%; justify-content: flex-start; text-align: start; overflow-wrap: anywhere; min-height: 26px; padding: 4px 6px; font-size: 13px; border: 0; }
+#voTagHint:not(:empty) { display: block; color: var(--muted); font-size: 12px; margin: 8px 5px 0; }
+#voDialog { width: min(420px,92vw); max-height: 90vh; margin: auto; }
+#voDialog::backdrop { background: #091820cf; }
+#voRecordForm { display: grid; gap: 12px; font-size: 13px; }
+#voDrop { border: 1px dashed var(--field-line); padding: 12px; border-radius: 8px; }
+#voDrop button { margin-top: 8px; }
+#voClip { color: var(--muted); overflow-wrap: anywhere; }
+#voRecordError:empty, #voError:empty { display: none; }
+#voList { flex: 1; grid-auto-rows: 90px; min-height: 0; overflow: auto; align-content: start; }
+.vo-take { width: 100%; height: 90px; padding: 10px 12px; display: grid; grid-template-columns: minmax(0,1fr) auto; align-content: center; gap: 4px; text-align: start; background: var(--card); }
+.vo-take strong, .vo-take small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vo-take small { grid-column: 1/-1; color: var(--muted); }
+.vo-take[aria-current=true] { border-color: var(--lime); }
+#voResult { background: var(--card); border-color: var(--edge); }
+#voResult .vo-result-head { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 8px; }
+#voResultMeta { grid-column: 1/-1; grid-row: 2; min-width: 0; overflow-wrap: anywhere; }
+#voResult .vo-result-head button { grid-column: 3; grid-row: 1; }
+#app[data-view='voice'] .rail-section[data-for='voice'] { display: flex; flex-direction: column; max-height: 100%; }
+@media (min-width: 900px) {
+  #app[data-view='voice'] { grid-template-columns: 250px minmax(0,1fr) 286px; }
+  #app[data-view='voice'] .inspector > .panel[data-for='voice'] { height: 100%; }
+}
+@media (min-width: 900px) and (max-width: 1100px) {
+  #app[data-view='voice'] { grid-template-columns: 210px minmax(0,1fr) 236px; grid-template-rows: 64px minmax(0,1fr) 28px; }
+  #app[data-view='voice'] .inspector { max-height: none; border-bottom: 0; }
+  #app[data-view='voice'] .rail { grid-area: 2 / 3; border-left: 1px solid var(--edge); border-right: 0; }
+  #app[data-view='voice'] #main { grid-area: 2 / 2; padding: 20px 18px; }
+  #app[data-view='voice'] .statusbar { grid-row: 3; }
+}
+@media (max-height: 740px) {
+  #voPanel { gap: 7px; }
+  #voPanel .voice-row { height: 40px; }
+  #voPicker, #voStandard { padding-top: 8px; }
+  #voVoiceCaption, #voStrength { margin-top: 6px; }
+  #voPanel .vo-caption { margin-bottom: 4px; }
+  #voAdd { padding-inline: 4px; font-size: 11px; }
+  #voPanel .voice-name { font-size: 12px; }
+}
+@media (max-width: 899px) { #voVoices { max-height: 40vh; } }
+@media (max-width: 700px) { #viewVoice #voText { height: 45vh; } }
+#voVoices .voice-tag .i { width: 12px; height: 12px; color: var(--lime); }
+#voVoices .voice-name { gap: 4px; }
+#viewVoice #voProg { flex: 1; min-height: 0; margin: 0; padding: 0; border: 0; background: transparent; }
+#voProg .tx-row { gap: 6px; }
+#voProg .tx-track { margin-top: 3px; }
+#voError:not(:empty) { position: absolute; bottom: 101px; inset-inline: 12px; padding: 9px 12px; background: var(--card); border: 1px solid var(--edge); border-radius: 8px; max-height: 40%; overflow: auto; }
+.vo-take .wave-graphic { grid-column: 1/-1; width: 70%; height: 18px; }
+.vo-take .wave-graphic rect { fill: var(--muted); }
+#voResult .play[data-playing] .play-icon, #voVoices .play[data-playing] .play-icon { background: none; border-inline: 3px solid currentColor; }
+#voVoices .play[data-loading] .play-icon { background: none; border: 0; margin: 0; width: auto; height: auto; }
+#voVoices .play[data-loading] .play-icon::after { content: '…'; }
+
+@media (min-width: 900px) {
+  #app[data-view='voice'] .rail-section[data-for='voice'] { height: 100%; }
+  #voList:empty { flex: 0; }
+}

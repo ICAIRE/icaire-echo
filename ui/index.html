@@ -105,35 +105,68 @@
 
     <!-- Voice-overs: the voice and its settings -->
     <section class="panel" data-for="voice" hidden>
-      <details class="card-details" id="voPanel" open>
-        <summary><i data-icon="voices"></i><span>Voice</span></summary>
-        <div class="panel-tabs" role="tablist">
-          <button type="button" role="tab" class="seg-btn" data-pane="voice" aria-selected="true">Voice</button>
-          <button type="button" role="tab" class="seg-btn" data-pane="settings" aria-selected="false">Settings</button>
+      <div id="voPanel">
+        <h2 class="vo-heading"><i data-icon="voices"></i>Voice</h2>
+        <div class="vo-engine">
+          <span class="vo-caption">Engine</span>
+          <div role="group" aria-label="Voice engine">
+            <button type="button" data-engine="standard" aria-pressed="true">Standard</button>
+            <button type="button" data-engine="expressive" aria-pressed="false">Expressive</button>
+          </div>
         </div>
-        <div class="panel-body pane vo-voice" data-pane="voice">
-          <p class="save-note">Chosen: <b id="voChosen"></b></p>
-          <label class="field"><span>Pacing</span><select id="voPacing"></select></label>
-          <p class="switch-help" id="voPacingAbout"></p>
+        <section id="voSetup" class="setup-card" hidden aria-live="polite">
+          <div>
+            <h2 id="voSetupTitle">Get the voices</h2>
+            <p id="voSetupText" class="muted"></p>
+          </div>
+          <div class="setup-act">
+            <button id="voSetupBtn" class="primary" type="button">Download the voices</button>
+            <div id="voSetupProg" class="tx-progress" hidden>
+              <div class="tx-row"><span class="tx-pct" id="voSetupPct">0%</span><span class="tx-label" id="voSetupLabel">Downloading…</span></div>
+              <div class="tx-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Download progress"><span id="voSetupBar"></span></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="voInstall" class="vo-install" hidden aria-labelledby="voInstallTitle">
+          <h2 id="voInstallTitle">Set up Expressive</h2>
+          <p>Arabic, stronger emotion, English sounds and voices from recordings.</p>
+          <p class="switch-help">Download 1.5 GB once. Works offline, at about real time.</p>
+          <button id="voDownload" type="button" class="primary">Download Expressive</button>
+          <progress id="voTransfer" hidden max="100" aria-label="Expressive download progress"></progress>
+          <p id="voTransferText" role="status"></p>
+        </section>
+        <div id="voPicker">
+          <label class="vo-caption" for="voLangPick">Language</label>
           <div class="voice-tools">
             <select id="voLangPick" aria-label="Language"></select>
             <label class="search-field"><i data-icon="search"></i><input id="voSearch" type="search" placeholder="Search" autocomplete="off" aria-label="Search voices"></label>
           </div>
           <div id="voExtra" class="vo-extra" hidden aria-live="polite"></div>
+          <span id="voVoiceCaption" class="vo-caption">Ready voices</span>
           <ul id="voVoices" class="voice-list" role="radiogroup" aria-label="Voices"></ul>
           <p class="switch-help" id="voNone" hidden>No voice matches that.</p>
-          <p class="switch-help">There is no Arabic voice yet: Kokoro does not speak Arabic.</p>
-        </div>
-        <div class="panel-body pane" data-pane="settings" hidden>
-          <div id="voAdv" class="vo-adv">
-            <div class="vo-adv-top">
-              <p class="save-note"><span>Starts at the chosen voice's own settings.</span> <span id="voAdvNote"></span></p>
-              <button id="voResetAll" class="small" type="button">Reset all</button>
-            </div>
-            <div id="voAdvBody" class="vo-adv-body"></div>
+          <button id="voAdd" type="button" class="small" hidden><i data-icon="mic"></i>Make a voice from a recording</button>
+          <div id="voStrength" hidden>
+            <label for="voIntensity">Emotion intensity</label>
+            <input id="voIntensity" type="range" min="0" max="1" step="0.05">
+            <div><span>Calm</span><span>Dramatic</span></div>
           </div>
         </div>
-      </details>
+        <div id="voStandard">
+          <label class="field"><span>Pacing</span><select id="voPacing"></select></label>
+          <p class="switch-help" id="voPacingAbout"></p>
+          <details><summary>Advanced settings</summary>
+            <div id="voAdv" class="vo-adv">
+              <div class="vo-adv-top">
+                <p class="save-note"><span>Starts at the chosen voice's own settings.</span> <span id="voAdvNote"></span></p>
+                <button id="voResetAll" class="small" type="button">Reset all</button>
+              </div>
+              <div id="voAdvBody" class="vo-adv-body"></div>
+            </div>
+          </details>
+        </div>
+      </div>
     </section>
 
     <!-- Settings -->
@@ -298,82 +331,48 @@
     <!-- voice-overs -->
     <section class="view" id="viewVoice" data-for="voice" hidden>
       <h1 class="view-heading">Turn a script into a voice-over</h1>
-      <p class="hero-subtitle left">Paste your text, pick a voice on the left, press Create. Everything stays on this computer.</p>
-
-      <section id="voSetup" class="setup-card" hidden aria-live="polite">
-        <div>
-          <h2 id="voSetupTitle">Get the voices</h2>
-          <p id="voSetupText" class="muted"></p>
-        </div>
-        <div class="setup-act">
-          <button id="voSetupBtn" class="primary" type="button">Download the voices</button>
-          <div id="voSetupProg" class="tx-progress" hidden>
-            <div class="tx-row"><span class="tx-pct" id="voSetupPct">0%</span><span class="tx-label" id="voSetupLabel">Downloading…</span></div>
-            <div class="tx-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Download progress"><span id="voSetupBar"></span></div>
-          </div>
-        </div>
-      </section>
-
+      <p class="hero-subtitle left">Everything stays on this computer.</p>
       <article class="meeting-view script-card">
         <div class="script-head">
-          <h2>Script</h2>
-          <span id="voCount" class="muted"></span>
+          <label for="voText">Script</label>
+          <button class="small" type="button" id="voInsert" disabled aria-expanded="false" aria-controls="voTags" title="Insert a tag (or type [ in the script)"><i data-icon="plus"></i>Insert tag</button>
+          <div id="voTags" hidden role="group" aria-label="Insert a script tag">
+            <div id="voTagGroups"></div><small id="voTagHint"></small>
+          </div>
         </div>
-        <div class="vo-tools" role="toolbar" aria-label="Insert a pause">
-          <span class="muted">Insert a pause where the cursor is:</span>
-          <button class="small" type="button" data-pause="0.5">½ s</button>
-          <button class="small" type="button" data-pause="1">1 s</button>
-          <button class="small" type="button" data-pause="2">2 s</button>
-          <button class="small" type="button" data-pause="4">4 s</button>
-        </div>
-        <div class="vo-tools" role="toolbar" aria-label="Insert a mood">
-          <span class="muted">Mood from the cursor on:</span>
-          <button class="small" type="button" data-tag="angry">Angry</button>
-          <button class="small" type="button" data-tag="happy">Happy</button>
-          <button class="small" type="button" data-tag="sad">Sad</button>
-          <button class="small" type="button" data-tag="excited">Excited</button>
-          <button class="small" type="button" data-tag="surprised">Surprised</button>
-          <button class="small" type="button" data-tag="calm">Calm</button>
-          <button class="small" type="button" data-tag="serious">Serious</button>
-          <button class="small" type="button" data-tag="whisper">Whisper</button>
-          <button class="small" type="button" data-tag="shouting">Shouting</button>
-          <button class="small" type="button" data-tag="normal">Normal</button>
-        </div>
-        <div class="vo-tools" role="toolbar" aria-label="Insert a sound or a change">
-          <span class="muted">Sounds:</span>
-          <button class="small" type="button" data-sound="laughs">Laughs</button>
-          <button class="small" type="button" data-sound="sighs">Sighs</button>
-          <button class="small" type="button" data-sound="breath">Breath</button>
-          <select class="small tone-pick" id="voAdjust" aria-label="Change the speed, loudness or pitch from the cursor">
-            <option value="">Speed, loudness, pitch…</option>
-            <option value="slow">Slower</option>
-            <option value="fast">Faster</option>
-            <option value="soft">Softer</option>
-            <option value="loud">Louder</option>
-            <option value="higher">Higher</option>
-            <option value="lower">Lower</option>
-          </select>
-          <select class="small tone-pick" id="voCharacter" aria-label="Another voice from the cursor">
-            <option value="">Another voice…</option>
-          </select>
-        </div>
-        <p class="tags-help muted">A mood lasts to the end of the line (or until the next mood); select words first to change only those. Kokoro has no real emotions: a mood is speed, pitch and loudness, and "Laughs" is the voice saying "ha ha".</p>
-        <textarea id="voText" spellcheck="true" dir="auto" placeholder="Type or paste what should be said.&#10;&#10;Each sentence gets its own little pause; an empty line makes a longer one. For more, put the cursor where you want silence and press a pause button above, or type [pause 2s]."></textarea>
+        <textarea id="voText" spellcheck="true" dir="auto" placeholder="Write or paste your script"></textarea>
+        <div class="vo-metrics"><span id="voCount"></span><span id="voEngineText">Standard</span></div>
         <div class="vo-go">
-          <button id="voGo" class="primary" type="button"><i data-icon="voices"></i>Create voice-over</button>
+          <button id="voGo" class="primary" type="button" disabled><i data-icon="waves"></i>Create voice-over</button>
           <span id="voSummary" class="muted"></span>
+          <div id="voProg" class="tx-progress" hidden>
+            <div class="tx-row"><span class="tx-pct" id="voPct">0%</span><span class="tx-label" id="voLabel">Starting the voice…</span><button id="voCancel" class="small" type="button">Cancel</button></div>
+            <div class="tx-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Voice-over progress"><span id="voBar"></span></div>
+          </div>
         </div>
         <div id="voError" class="form-error" role="alert"></div>
-        <div id="voProg" class="tx-progress" hidden>
-          <div class="tx-row"><span class="tx-pct" id="voPct">0%</span><span class="tx-label" id="voLabel">Starting the voice…</span><button id="voCancel" class="small" type="button">Cancel</button></div>
-          <div class="tx-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Voice-over progress"><span id="voBar"></span></div>
-        </div>
         <div id="voResult" class="vo-result" hidden>
           <div class="vo-result-head"><i data-icon="check"></i><strong>Ready</strong><span id="voResultMeta" class="muted"></span></div>
           <div id="voPlayer"></div>
           <div class="vo-result-act" id="voResultAct"></div>
         </div>
       </article>
+      <dialog id="voDialog" aria-labelledby="voRecordTitle">
+        <form id="voRecordForm">
+          <h2 id="voRecordTitle">Make a voice from a recording</h2>
+          <p class="switch-help">Use 10 to 30 seconds of one person speaking clearly.</p>
+          <label class="field"><span>Voice name</span><input id="voName" required autocomplete="off"></label>
+          <div id="voDrop">
+            <label class="field"><span>Choose or drop a recording</span><input type="file" accept="audio/*,video/*" id="voFile"></label>
+            <button type="button" id="voRecord"><i data-icon="mic"></i><span>Record with microphone</span></button>
+            <output id="voTimer" aria-label="Recording duration"></output>
+            <p id="voClip" role="status"></p>
+          </div>
+          <label><input id="voConsent" type="checkbox" required> The person speaking agreed to their voice being copied.</label>
+          <p id="voRecordError" class="form-error" role="alert"></p>
+          <div><button class="primary" id="voStore">Add voice</button> <button type="button" id="voDismiss">Cancel</button></div>
+        </form>
+      </dialog>
     </section>
 
     <!-- settings -->
