@@ -5,7 +5,9 @@ voice-over. It all runs on your own computer. Nothing is uploaded.
 
 - **Record.** Send a bot into a Google Meet call, or record this computer's microphone and the call's
   sound (works for Zoom and Teams too). When you stop, the transcript is written on its own.
-- **Voice-overs.** Paste a script, pick a voice, get an MP3. 54 voices in 9 languages.
+- **Voice-overs.** Paste a script, pick a voice, get an MP3. **Standard**: 54 voices in 9 languages, fast.
+  **Expressive**: real laughs and sighs, stronger moods, Arabic and 21 more languages, and a voice made from a
+  short recording.
 
 Made at [ICAIRE](https://icaire.org), the International Center for AI Research and Ethics.
 
@@ -31,6 +33,7 @@ The large files download from inside the app the first time you need them:
 | Voices, for voice-overs | 354 MB |
 | Speaker models that tell voices apart | 32 MB |
 | Japanese or Chinese pronunciation, only if you use those voices | 29 MB / 20 MB |
+| Expressive voice-overs, only if you choose Expressive | 1.5 GB |
 
 The bot also needs Google Chrome.
 
@@ -63,6 +66,14 @@ character. They show in the script as tags you can also type, and nest:
 ```
 
 Kokoro has no real emotions: a mood is a mix of speed, pitch and loudness, not acting.
+
+**Expressive** acts them. Choose it once and it downloads (1.5 GB); after that it works offline, at about the
+speed of speech. In English the moods are acted and the sounds are real: `[laugh]`, `[chuckle]`, `[sigh]`,
+`[gasp]`, `[cough]`, `[groan]`, `[sniff]`, `[shush]`, `[clear throat]`, plus the moods `[scared]`, `[sarcastic]`,
+`[dramatic]` and `[crying]`. In the other 22 languages (Arabic among them) there are no sounds, and **Emotion
+intensity** sets how strongly the moods come through. A voice can be one of the ready ones (Heart, Bella, Emma,
+Michael, Fenrir, George) or made from 10 to 30 seconds of someone speaking clearly. Only copy a voice with that
+person's agreement.
 
 ## Your files
 
@@ -116,7 +127,7 @@ A copy run from the code keeps its data next to the code. Pushing a tag `v<versi
 installers on GitHub and publishes them as a release (`.github/workflows/release.yml`).
 
 Transcription is [whisper.cpp](https://github.com/ggml-org/whisper.cpp). Voice-over is
-[Kokoro](https://github.com/hexgrad/kokoro) on onnxruntime, with [eSpeak NG](https://github.com/espeak-ng/espeak-ng)
+[Kokoro](https://github.com/hexgrad/kokoro) and, for Expressive, [Chatterbox](https://github.com/resemble-ai/chatterbox) (Turbo and Multilingual) on onnxruntime, with [eSpeak NG](https://github.com/espeak-ng/espeak-ng)
 in WebAssembly for pronunciation. Speakers are told apart with sherpa-onnx.
 
 Settings you can set in the environment: `PORT`, `WHISPER_CPP` (path to `whisper-cli`), `WHISPER_MODEL`
@@ -125,7 +136,8 @@ and `MRB_NO_AUTO_UPDATE=1`.
 
 ## Credits and license
 
-Built on whisper.cpp (MIT), Kokoro (Apache 2.0) and kokoro-onnx (MIT), eSpeak NG (GPL 3.0), onnxruntime
+Built on whisper.cpp (MIT), Kokoro (Apache 2.0) and kokoro-onnx (MIT), Chatterbox by Resemble AI (MIT),
+Hugging Face tokenizers (Apache 2.0), eSpeak NG (GPL 3.0), onnxruntime
 (MIT), sherpa-onnx (Apache 2.0), the Silero voice detector (MIT), Node.js (MIT), and for Japanese and
 Chinese: jpreprocess with NAIST-JDIC, jieba and pypinyin. Each keeps its own license.
 

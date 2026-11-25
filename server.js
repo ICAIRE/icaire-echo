@@ -10,6 +10,7 @@ const { writeTranscript } = require('./merge');
 const { ts } = require('./lib/timeline');
 const whisper = require('./lib/whisper');
 const kokoro = require('./lib/kokoro');
+const chatterbox = require('./lib/chatterbox');
 const { Updater, RESTART_CODE } = require('./lib/updater');
 const diarize = require('./lib/diarize');
 const { HAS_CHROME } = require('./lib/session');
@@ -42,6 +43,8 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
   const voiceSetup = new kokoro.Download();
   const whisperSetup = new whisper.ModelDownload();
   const voiceExtra = new kokoro.ExtraInstall();
+  let expressiveSetup = new chatterbox.Download(); // the Expressive engine's one-time download
+  expressiveSetup.on('update', () => broadcast());
   voiceExtra.on('update', () => broadcast());
   whisperSetup.on('update', () => broadcast());
   voiceSetup.on('update', () => broadcast());
@@ -58,6 +61,7 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
     voiceSetup: voiceSetup.status === 'idle' ? null : voiceSetup.snapshot(),
     whisperSetup: whisperSetup.status === 'idle' ? null : whisperSetup.snapshot(),
     voiceExtra: voiceExtra.status === 'idle' ? null : voiceExtra.snapshot(),
+    expressiveSetup: expressiveSetup.status === 'idle' ? null : expressiveSetup.snapshot(),
     update: updater.snapshot(),
     background: process.env.MRB_BACKGROUND === '1',
   });
@@ -557,11 +561,17 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
         if (!text) return json(res, 400, { error: 'Type or paste the script first.' });
         if (text.length > 200000) return json(res, 400, { error: 'That script is too long for one voice-over (over 200,000 characters). Split it into parts.' });
         const d = await voiceDetect();
-        if (!d.available) return json(res, 400, { error: d.reason });
-        const missing = needsExtra(kokoro.settingsFor(body.preset, body.changes));
-        if (missing) return json(res, 400, { error: missing.message, needsExtra: missing.key });
+        const settings = kokoro.settingsFor(body.preset, body.changes);
+        if (settings.engine === 'expressive') {
+          // Expressive needs its own download; the Standard voices only to make a ready voice's sample once
+          if (!chatterbox.installed()) return json(res, 400, { error: 'Expressive is not downloaded yet.', needsExpressive: true });
+        } else {
+          if (!d.available) return json(res, 400, { error: d.reason });
+          const missing = needsExtra(settings);
+          if (missing) return json(res, 400, { error: missing.message, needsExtra: missing.key });
+        }
         const id = freshId(voiceRoot);
-        voiceJob = new kokoro.VoiceJob({ id, text, preset: String(body.preset || 'presenter'), settings: kokoro.settingsFor(body.preset, body.changes), outDir: path.join(voiceRoot, id), modelDir: d.modelDir });
+        voiceJob = new kokoro.VoiceJob({ id, text, preset: String(body.preset || 'presenter'), settings, outDir: path.join(voiceRoot, id), modelDir: d.modelDir });
         voiceJob.on('update', broadcast);
         const mine = voiceJob;
         mine.run().then(() => {
@@ -597,6 +607,48 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
         if (!d.engine) return json(res, 400, { error: d.reason });
         if (!voiceExtra.active) voiceExtra.run(body.key).then(broadcast);
         return json(res, 200, voiceExtra.snapshot());
+      }
+      // ---------- Expressive voice-overs (Chatterbox) ----------
+      if (req.method === 'GET' && p === '/api/expressive') return json(res, 200, { ...chatterbox.status(), setup: expressiveSetup.status === 'idle' ? null : expressiveSetup.snapshot() });
+      if (req.method === 'POST' && p === '/api/expressive/setup') {
+        if (!expressiveSetup.active) {
+          if (['done', 'error', 'cancelled'].includes(expressiveSetup.status)) {
+            expressiveSetup = new chatterbox.Download();
+            expressiveSetup.on('update', () => broadcast());
+          }
+          expressiveSetup.run().then(broadcast);
+        }
+        return json(res, 200, expressiveSetup.snapshot());
+      }
+      if (req.method === 'POST' && p === '/api/expressive/setup/cancel') {
+        expressiveSetup.cancel();
+        broadcast();
+        return json(res, 200, expressiveSetup.snapshot());
+      }
+      // a voice from a recording: the audio file is the body; ?name= and ?consent=1 (the speaker agreed to it)
+      if (req.method === 'POST' && p === '/api/expressive/voices') {
+        if (url.searchParams.get('consent') !== '1') return json(res, 400, { error: 'Confirm that the person speaking agreed to their voice being copied.' });
+        let buf;
+        try { buf = await readRaw(req, 60 * 1048576); } catch { return json(res, 413, { error: 'That recording is too large. Use 10 to 30 seconds of speech.' }); }
+        if (!buf.length) return json(res, 400, { error: 'Add a recording first.' });
+        const tmp = path.join(require('os').tmpdir(), `echo-voice-${process.pid}-${Date.now()}`);
+        fs.writeFileSync(tmp, buf);
+        try {
+          return json(res, 200, chatterbox.addVoice({ input: tmp, name: url.searchParams.get('name') }));
+        } catch (e) {
+          return json(res, 400, { error: e.message });
+        } finally {
+          fs.rmSync(tmp, { force: true });
+        }
+      }
+      if (req.method === 'POST' && p === '/api/expressive/voices/remove') {
+        const body = await readBody(req);
+        try {
+          chatterbox.removeVoice(body.id);
+          return json(res, 200, { ok: true, voices: chatterbox.voices() });
+        } catch (e) {
+          return json(res, 400, { error: e.message });
+        }
       }
       if (req.method === 'POST' && p === '/api/voice/cancel') {
         if (!voiceJob || !voiceJob.active) return json(res, 409, { error: 'No voice-over is being made.' });
@@ -786,7 +838,7 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
   });
 
   // nothing is recording, transcribing, making a voice-over or downloading
-  const idle = () => !(current && current.active) && !(job && job.active) && !(voiceJob && voiceJob.active) && !local.size && !whisperSetup.active && !voiceSetup.active && !voiceExtra.active;
+  const idle = () => !(current && current.active) && !(job && job.active) && !(voiceJob && voiceJob.active) && !local.size && !whisperSetup.active && !voiceSetup.active && !voiceExtra.active && !expressiveSetup.active;
   // the launcher starts the app again when it ends with RESTART_CODE (and installs any new parts first)
   const restart = () => setTimeout(() => process.exit(RESTART_CODE), 1500);
   if (autoUpdate) updater.auto({ isIdle: idle, onUpdated: restart });

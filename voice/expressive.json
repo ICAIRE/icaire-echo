@@ -1,0 +1,326 @@
+{
+ "about": "Expressive voice-overs: Chatterbox by Resemble AI (MIT). Turbo reads English with real sounds and moods; Multilingual reads 23 languages, with intensity. Both copy a voice from a short recording. Files are pinned to a revision and checked by sha256. Multilingual's own audio decoder takes 45 s to load; Turbo's (a distilled one for the same speech tokens) reads its tokens just as well (Whisper hears the same words, the voice matches at 0.90) in a fraction of the time, so only Turbo's is downloaded.",
+ "files": [
+  {
+   "name": "turbo/tokenizer.json",
+   "bytes": 3562272,
+   "sha256": "3f04e34bea22f9144d1a19151154095bc9ce0430bf421304f5797e716288a906",
+   "url": "https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX/resolve/d21799bd0354adb85e348b8a0442a8405110a2cf/tokenizer.json"
+  },
+  {
+   "name": "turbo/tokenizer_config.json",
+   "bytes": 414,
+   "sha256": "0d637373c70a54c3c7202c0c12b40ff4f346c329960283f5a88031717d73c66f",
+   "url": "https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX/resolve/d21799bd0354adb85e348b8a0442a8405110a2cf/tokenizer_config.json"
+  },
+  {
+   "name": "turbo/speech_encoder_q4f16.onnx",
+   "bytes": 1217655,
+   "sha256": "004407d26127c1d8e974bd213ecff8dbe67611527ca7a1930e656b80d9c51125",
+   "url": "https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX/resolve/d21799bd0354adb85e348b8a0442a8405110a2cf/onnx/speech_encoder_q4f16.onnx"
+  },
+  {
+   "name": "turbo/speech_encoder_q4f16.onnx_data",
+   "bytes": 177289008,
+   "sha256": "c017ab57887418e0609afdef52b0cbc17f43cb304e78af44300c0292cd2b2fa9",
+   "url": "https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX/resolve/d21799bd0354adb85e348b8a0442a8405110a2cf/onnx/speech_encoder_q4f16.onnx_data"
+  },
+  {
+   "name": "turbo/embed_tokens_q4f16.onnx",
+   "bytes": 2548,
+   "sha256": "e5c9507c89e770e35d68bdd669e4ae44b34272232e84f010f2c97959feae79b3",
+   "url": "https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX/resolve/d21799bd0354adb85e348b8a0442a8405110a2cf/onnx/embed_tokens_q4f16.onnx"
+  },
+  {
+   "name": "turbo/embed_tokens_q4f16.onnx_data",
+   "bytes": 33648688,
+   "sha256": "37e96447b5f3ef46f46fb35cc599cfcb95b277e5528cc0c89bab78169da620ef",
+   "url": "https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX/resolve/d21799bd0354adb85e348b8a0442a8405110a2cf/onnx/embed_tokens_q4f16.onnx_data"
+  },
+  {
+   "name": "turbo/language_model_q4f16.onnx",
+   "bytes": 276803,
+   "sha256": "4c5d83674c52bb71683a1ea1f60e2608b80cda48aafce67e8f8c03162c474ad5",
+   "url": "https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX/resolve/d21799bd0354adb85e348b8a0442a8405110a2cf/onnx/language_model_q4f16.onnx"
+  },
+  {
+   "name": "turbo/language_model_q4f16.onnx_data",
+   "bytes": 183981430,
+   "sha256": "f084f21f977e365e76e622d2958c309ff894537f7b7133ac7fc5ce8fc055d6f9",
+   "url": "https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX/resolve/d21799bd0354adb85e348b8a0442a8405110a2cf/onnx/language_model_q4f16.onnx_data"
+  },
+  {
+   "name": "turbo/conditional_decoder_q4f16.onnx",
+   "bytes": 2394210,
+   "sha256": "17c9f7caef818605df2dc197c2f41682c0bda7fe437b8652dae8366de8b68b7e",
+   "url": "https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX/resolve/d21799bd0354adb85e348b8a0442a8405110a2cf/onnx/conditional_decoder_q4f16.onnx"
+  },
+  {
+   "name": "turbo/conditional_decoder_q4f16.onnx_data",
+   "bytes": 162996136,
+   "sha256": "3e53cc7cc05e72957797c620e1bf0c6d6b909df937de4756c6e534d50854ca3e",
+   "url": "https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX/resolve/d21799bd0354adb85e348b8a0442a8405110a2cf/onnx/conditional_decoder_q4f16.onnx_data"
+  },
+  {
+   "name": "multilingual/tokenizer.json",
+   "bytes": 71798,
+   "sha256": "29d48c4a178f6af3ad5130097c34744639e9294847b38a7b912c8c68027cb819",
+   "url": "https://huggingface.co/onnx-community/chatterbox-multilingual-ONNX/resolve/452d3f434aa592098f1eedac9099f33642ab2da5/tokenizer.json"
+  },
+  {
+   "name": "multilingual/tokenizer_config.json",
+   "bytes": 244,
+   "sha256": "b35967f93e30313d05fc9d520721ca9f671aaa5b3edbb03059aed3ff68b4c4c0",
+   "url": "https://huggingface.co/onnx-community/chatterbox-multilingual-ONNX/resolve/452d3f434aa592098f1eedac9099f33642ab2da5/tokenizer_config.json"
+  },
+  {
+   "name": "multilingual/speech_encoder.onnx",
+   "bytes": 1184608,
+   "sha256": "8f1c8a0f89b77bf9cd5dd8f2e034eb2c79dc00fe70d41196b28c257643b00ccb",
+   "url": "https://huggingface.co/onnx-community/chatterbox-multilingual-ONNX/resolve/452d3f434aa592098f1eedac9099f33642ab2da5/onnx/speech_encoder.onnx"
+  },
+  {
+   "name": "multilingual/speech_encoder.onnx_data",
+   "bytes": 591274880,
+   "sha256": "92f8f290fc9720e169bc2412c507209e20b03f6564bc3243739e25c56f7dfb8f",
+   "url": "https://huggingface.co/onnx-community/chatterbox-multilingual-ONNX/resolve/452d3f434aa592098f1eedac9099f33642ab2da5/onnx/speech_encoder.onnx_data"
+  },
+  {
+   "name": "multilingual/embed_tokens.onnx",
+   "bytes": 13286,
+   "sha256": "f785819ca4f6271262d5bb8971d62796c3a909e3b031982c113dbe83a4c3b854",
+   "url": "https://huggingface.co/onnx-community/chatterbox-multilingual-ONNX/resolve/452d3f434aa592098f1eedac9099f33642ab2da5/onnx/embed_tokens.onnx"
+  },
+  {
+   "name": "multilingual/embed_tokens.onnx_data",
+   "bytes": 68390912,
+   "sha256": "2a15f7dd73b2ee47f6edf87740324011594b5a528ed6471ae55e327ed6cad68c",
+   "url": "https://huggingface.co/onnx-community/chatterbox-multilingual-ONNX/resolve/452d3f434aa592098f1eedac9099f33642ab2da5/onnx/embed_tokens.onnx_data"
+  },
+  {
+   "name": "multilingual/language_model_q4f16.onnx",
+   "bytes": 229388,
+   "sha256": "3b78e9235be5e2e2a811e482399155cb30415f6d87c98c21d12bf48843fc928f",
+   "url": "https://huggingface.co/onnx-community/chatterbox-multilingual-ONNX/resolve/452d3f434aa592098f1eedac9099f33642ab2da5/onnx/language_model_q4f16.onnx"
+  },
+  {
+   "name": "multilingual/language_model_q4f16.onnx_data",
+   "bytes": 304737408,
+   "sha256": "bdbc79504d20742b5d028074b4f1cdca8872e013fdfbbcea6b8b03154fe85a42",
+   "url": "https://huggingface.co/onnx-community/chatterbox-multilingual-ONNX/resolve/452d3f434aa592098f1eedac9099f33642ab2da5/onnx/language_model_q4f16.onnx_data"
+  },
+  {
+   "name": "multilingual/default_voice.wav",
+   "bytes": 714320,
+   "sha256": "3ebc531cdaba358a327099c1c4f0448026719957bcf4d8e9868767f227e02f4e",
+   "url": "https://huggingface.co/onnx-community/chatterbox-multilingual-ONNX/resolve/452d3f434aa592098f1eedac9099f33642ab2da5/default_voice.wav"
+  }
+ ],
+ "languages": [
+  {
+   "code": "en",
+   "name": "English",
+   "rtl": false,
+   "sounds": true,
+   "intensity": false
+  },
+  {
+   "code": "ar",
+   "name": "Arabic",
+   "rtl": true,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "da",
+   "name": "Danish",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "de",
+   "name": "German",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "el",
+   "name": "Greek",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "es",
+   "name": "Spanish",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "fi",
+   "name": "Finnish",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "fr",
+   "name": "French",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "he",
+   "name": "Hebrew",
+   "rtl": true,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "hi",
+   "name": "Hindi",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "it",
+   "name": "Italian",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "ja",
+   "name": "Japanese",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "ko",
+   "name": "Korean",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "ms",
+   "name": "Malay",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "nl",
+   "name": "Dutch",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "no",
+   "name": "Norwegian",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "pl",
+   "name": "Polish",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "pt",
+   "name": "Portuguese",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "ru",
+   "name": "Russian",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "sv",
+   "name": "Swedish",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "sw",
+   "name": "Swahili",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "tr",
+   "name": "Turkish",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  },
+  {
+   "code": "zh",
+   "name": "Chinese",
+   "rtl": false,
+   "sounds": false,
+   "intensity": true
+  }
+ ],
+ "readyVoices": [
+  {
+   "id": "heart",
+   "name": "Heart",
+   "kokoro": "af_heart",
+   "about": "Warm, female, American"
+  },
+  {
+   "id": "bella",
+   "name": "Bella",
+   "kokoro": "af_bella",
+   "about": "Bright, female, American"
+  },
+  {
+   "id": "emma",
+   "name": "Emma",
+   "kokoro": "bf_emma",
+   "about": "Clear, female, British"
+  },
+  {
+   "id": "michael",
+   "name": "Michael",
+   "kokoro": "am_michael",
+   "about": "Steady, male, American"
+  },
+  {
+   "id": "fenrir",
+   "name": "Fenrir",
+   "kokoro": "am_fenrir",
+   "about": "Deep, male, American"
+  },
+  {
+   "id": "george",
+   "name": "George",
+   "kokoro": "bm_george",
+   "about": "Measured, male, British"
+  }
+ ],
+ "referenceText": "Good morning, everyone, and thank you for joining us today. We have a lot to share, so let's take it one step at a time. I think you'll enjoy what comes next.",
+ "defaults": {
+  "lang": "en",
+  "voice": "heart",
+  "intensity": 0.5
+ }
+}
