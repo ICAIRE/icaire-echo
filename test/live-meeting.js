@@ -13,13 +13,13 @@
 //      both have to ask to join, and the host lets them in only after --admit-after seconds (default 40), so
 //      the waiting room is part of the test.
 //
-//   node test/live-meeting.js [--panel http://localhost:4777] [--speakers 4] [--lobby] [--admit-after 40] [--keep]
+//   node test/live-meeting.js [--panel http://localhost:4777] [--speakers 4] [--lobby] [--host-authuser 1] [--admit-after 40] [--keep]
 const fs = require('fs');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
 const { chromium } = require('playwright-core');
 const ffmpeg = require('ffmpeg-static');
-const { CHROME, PROFILE, regularUserAgent } = require('../lib/session');
+const { CHROME, PROFILE, regularUserAgent, profileDir } = require('../lib/session');
 const { clickJoin } = require('../lib/meet');
 
 const args = process.argv.slice(2);
@@ -41,6 +41,10 @@ const LOBBY = args.includes('--lobby');
 const GIVEN_URL = opt('--url', null);
 const ALL_GUESTS = args.includes('--guests') || !!GIVEN_URL;
 const ADMIT_AFTER = Number(opt('--admit-after', 40)) * 1000;
+// --host-authuser 1: speaker 1 hosts as the profile's second Google account, so everyone on the first account
+// (the other speakers and the recorder itself) has to ask to join and wait: the waiting room with the real bot
+const HOST_AU = opt('--host-authuser', null);
+const withAu = (u, au) => (au == null ? u : u + (u.includes('?') ? '&' : '?') + 'authuser=' + au);
 
 // gap = seconds after the previous line ENDS (negative: starts before it ends, i.e. interrupts / overlaps).
 const SCRIPT = [
@@ -164,6 +168,8 @@ async function openSpeaker(i, profile) {
     // the copied sign-in is locked with the computer's keychain, like the bot's own (lib/session.js)
     ignoreDefaultArgs: ['--enable-automation', '--use-mock-keychain', '--password-store=basic'],
     args: [
+      // a copy of the bot's profile opens the profile in it that holds the Google sign-in (lib/session.js)
+      ...(fs.existsSync(path.join(profile, 'Local State')) ? [`--profile-directory=${profileDir(profile)}`] : []),
       '--use-fake-ui-for-media-stream',
       '--use-fake-device-for-media-stream',
       '--autoplay-policy=no-user-gesture-required',
@@ -431,7 +437,7 @@ else if (require.main === module) (async () => {
     // speaker 1 creates the meeting
     const host = speakers[0];
     let url = GIVEN_URL;
-    if (!url) host.page.goto('https://meet.google.com/new', { waitUntil: 'commit', timeout: 60000 }).catch(() => {});
+    if (!url) host.page.goto(withAu('https://meet.google.com/new', HOST_AU), { waitUntil: 'commit', timeout: 60000 }).catch(() => {});
     for (let n = 0; n < 60 && !url; n++) {
       await sleep(1000);
       const m = /meet\.google\.com\/([a-z]{3}-[a-z]{4}-[a-z]{3})/.exec(host.page.url());
@@ -445,7 +451,7 @@ else if (require.main === module) (async () => {
       log('Everyone asks to join; the host of the meeting lets them in.');
       await Promise.all(speakers.map((sp) => joinCall(sp, url)));
     } else {
-      await joinCall(host, url);
+      await joinCall(host, withAu(url, HOST_AU));
       stopAdmitting = admitLoop(host);
       await Promise.all(speakers.slice(1).map((sp) => joinCall(sp, url)));
     }

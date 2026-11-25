@@ -75,6 +75,8 @@
           <div class="panel-section" data-mode="local">
             <label class="switch-line"><i data-icon="audio"></i><span>Call sound</span><input id="localCall" type="checkbox" checked></label>
             <p class="switch-help" id="localHint">Also records the other people in your call.</p>
+            <label class="switch-line" id="videoSwitch" hidden><i data-icon="screen"></i><span>Screen video</span><input id="localVideo" type="checkbox" aria-describedby="videoHint"></label>
+            <p class="switch-help" id="videoHint" hidden>Also records your screen, with the sound. About 0.7 GB an hour.</p>
           </div>
           <div class="panel-section" data-mode="bot">
             <label class="field"><span>The bot's name in the call</span><input dir="auto" id="name" type="text" value="Recorder" maxlength="60" autocomplete="off"></label>

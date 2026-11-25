@@ -5,6 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio;
+mod video;
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -148,16 +149,22 @@ struct Started {
     device: String,
     system: bool,
     system_error: Option<String>,
+    video: bool,
+    video_error: Option<String>,
 }
 
 #[tauri::command]
-async fn record_start(state: tauri::State<'_, App>, dir: String, system: bool) -> Result<Started, String> {
+async fn record_start(state: tauri::State<'_, App>, dir: String, system: bool, video: Option<bool>, ffmpeg: Option<String>) -> Result<Started, String> {
     if state.recording.lock().unwrap().is_some() {
         return Err("A recording is already running.".into());
     }
     // the devices open on their own threads; this waits for them away from the main thread
-    let r = tauri::async_runtime::spawn_blocking(move || audio::Recording::start(Path::new(&dir), system)).await.map_err(|e| e.to_string())??;
-    let out = Started { device: r.device.clone(), system: r.system.is_some(), system_error: r.system_error.clone() };
+    // the screen too, when asked for: ffmpeg (the app's own copy, the server says where) encodes it
+    let ffmpeg = if video.unwrap_or(false) { ffmpeg.map(std::path::PathBuf::from).filter(|p| p.exists()) } else { None };
+    let video_missing = video.unwrap_or(false) && ffmpeg.is_none();
+    let r = tauri::async_runtime::spawn_blocking(move || audio::Recording::start(Path::new(&dir), system, ffmpeg.as_deref())).await.map_err(|e| e.to_string())??;
+    let video_error = if video_missing { Some("The video encoder was not found.".into()) } else { r.video_error.clone() };
+    let out = Started { device: r.device.clone(), system: r.system.is_some(), system_error: r.system_error.clone(), video: r.video.is_some(), video_error };
     *state.recording.lock().unwrap() = Some(r);
     Ok(out)
 }
@@ -196,7 +203,34 @@ fn quit_now(handle: tauri::AppHandle) {
     handle.exit(0);
 }
 
+/// `icaire-echo --video-test <dir> <ffmpeg> <seconds>`: records the screen for that long with a 2 s pause after
+/// 2 s, then exits (checks of video.rs without the window: the file should last <seconds> - 2)
+fn video_test(args: &[String]) -> ! {
+    let (dir, ffmpeg, secs) = (Path::new(&args[2]), Path::new(&args[3]), args[4].parse::<f64>().unwrap_or(8.0));
+    std::fs::create_dir_all(dir).ok();
+    let paused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let v = match video::Video::start(dir, ffmpeg, paused.clone(), Instant::now()) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("video did not start: {e}");
+            std::process::exit(1);
+        }
+    };
+    std::thread::sleep(Duration::from_secs(2));
+    paused.store(true, std::sync::atomic::Ordering::SeqCst);
+    std::thread::sleep(Duration::from_secs(2));
+    paused.store(false, std::sync::atomic::Ordering::SeqCst);
+    std::thread::sleep(Duration::from_secs_f64((secs - 4.0).max(0.0)));
+    v.stop();
+    println!("expected {:.1} s", secs - 2.0);
+    std::process::exit(0);
+}
+
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() >= 5 && args[1] == "--video-test" {
+        video_test(&args);
+    }
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|handle, _, _| {
             // opened again: show the window that is already there

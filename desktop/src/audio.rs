@@ -90,6 +90,9 @@ pub struct Recording {
     pub system: Option<Arc<Track>>,
     pub device: String,
     pub system_error: Option<String>,
+    /// the screen, when asked for (video.rs); `video_error` says why it could not start
+    pub video: Option<crate::video::Video>,
+    pub video_error: Option<String>,
     paused: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
@@ -99,7 +102,7 @@ impl Recording {
     /// Opens the microphone (and the computer's sound when `system`), each on its own thread, and waits until they
     /// are recording (or failed). The microphone is required; the computer's sound is best effort: if it cannot be
     /// opened the recording goes on with the microphone, and `system_error` says why.
-    pub fn start(dir: &Path, system: bool) -> Result<Recording, String> {
+    pub fn start(dir: &Path, system: bool, video_ffmpeg: Option<&Path>) -> Result<Recording, String> {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         let paused = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
@@ -120,6 +123,7 @@ impl Recording {
             }
         };
 
+        let anchor = std::time::Instant::now(); // the microphone is recording: the video counts from here
         let (mut sys_track, mut system_error) = (None, None);
         if system {
             let t = Track::new(paused.clone());
@@ -131,7 +135,15 @@ impl Recording {
                 Err(_) => system_error = Some("The computer's sound did not start in time.".into()),
             }
         }
-        Ok(Recording { mic, system: sys_track, device, system_error, paused, stop, threads })
+        // the screen is best effort too: the sound goes on without it
+        let (mut video, mut video_error) = (None, None);
+        if let Some(ffmpeg) = video_ffmpeg {
+            match crate::video::Video::start(dir, ffmpeg, paused.clone(), anchor) {
+                Ok(v) => video = Some(v),
+                Err(e) => video_error = Some(e),
+            }
+        }
+        Ok(Recording { mic, system: sys_track, device, system_error, video, video_error, paused, stop, threads })
     }
 
     pub fn set_paused(&self, on: bool) {
@@ -153,6 +165,9 @@ impl Recording {
         self.mic.finish();
         if let Some(s) = &self.system {
             s.finish();
+        }
+        if let Some(v) = self.video.take() {
+            v.stop();
         }
         self.mic.seconds()
     }

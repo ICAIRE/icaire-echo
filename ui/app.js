@@ -278,7 +278,8 @@ function render() {
     $('captureStatus').replaceChildren(
       el('span', {}, icon('mic'), local.device),
       el('span', { class: local.call === true ? 'on' : '' }, icon('audio'), local.call === true ? 'Call sound on' : 'Microphone only'),
-      $('people').value ? el('span', {}, icon('people'), $('people').value === '1' ? 'Just you' : `${$('people').value} people`) : null
+      ...(local.video ? [el('span', { class: 'on' }, icon('screen'), 'Screen video: on')] : []),
+      ...($('people').value ? [el('span', {}, icon('people'), $('people').value === '1' ? 'Just you' : `${$('people').value} people`)] : [])
     );
     return;
   }
@@ -490,12 +491,17 @@ async function startNative() {
   const btn = $('bigBtn');
   btn.disabled = true;
   let id;
-  let dir;
+  let dir, ffmpeg;
+  const system = $('localCall').checked;
+  const video = $('localVideo').checked;
   try {
-    ({ id, dir } = await api('/api/local/start', { native: true, title: $('newTitle').value, source: $('localCall').checked ? 'microphone+computer' : 'microphone', people: Number($('people').value) || null }));
-    const r = await NATIVE.invoke('record_start', { dir, system: $('localCall').checked });
-    local = { id, native: true, call: r.system, t0: performance.now(), levels: [], device: r.device || 'Microphone', pausedMs: 0 };
-    if (r.system_error) toast('Recording your microphone only: ' + r.system_error);
+    ({ id, dir, ffmpeg } = await api('/api/local/start', { native: true, title: $('newTitle').value, source: system ? 'microphone+computer' : 'microphone', people: Number($('people').value) || null }));
+    const r = await NATIVE.invoke('record_start', { dir, system, video, ffmpeg });
+    local = { id, native: true, call: r.system, video: r.video, t0: performance.now(), levels: [], device: r.device || 'Microphone', pausedMs: 0 };
+    const warnings = [];
+    if (r.system_error) warnings.push('Call sound is off: ' + r.system_error);
+    if (r.video_error) warnings.push('Screen video is off: ' + r.video_error);
+    if (warnings.length) toast('Still recording audio. ' + warnings.join(' '));
   } catch (e) {
     btn.disabled = false;
     err.textContent = String((e && e.message) || e);
@@ -736,10 +742,13 @@ $('show').addEventListener('change', () => {
 });
 $('localCall').addEventListener('change', () => {
   $('localHint').textContent = $('localCall').checked
-    ? 'Also records the other people in your call. ' + (NATIVE ? (MAC ? 'The first time, macOS asks to allow ICAIRE Echo under Screen & System Audio Recording (only the sound is recorded).' : 'Nothing to share or pick.') : callHelp(false))
-    : 'Only your microphone is recorded.';
+    ? 'Also records the other people in your call. ' + (NATIVE ? (MAC ? 'The first time, macOS asks to allow ICAIRE Echo under Screen & System Audio Recording.' : 'Nothing to share or pick.') : callHelp(false))
+    : 'Records sound from your microphone only.';
   try { localStorage.setItem('echo.call', $('localCall').checked ? '1' : '0'); } catch {}
   renderReadiness();
+});
+$('localVideo').addEventListener('change', () => {
+  try { localStorage.setItem('echo.video', $('localVideo').checked ? '1' : '0'); } catch {}
 });
 $('name').addEventListener('change', () => {
   try { localStorage.setItem('echo.name', $('name').value); } catch {}
@@ -1233,10 +1242,11 @@ $('recRename').addEventListener('click', () => {
   $('recTitleInput').focus();
   $('recTitleInput').select();
 });
-// the bot's video, with who is speaking as captions
+// Bot recordings include speaker captions.
 function showVideo(on) {
   const box = $('videoBox');
-  $('recWatch').querySelector('span').textContent = on ? 'Hide the video' : 'Watch with names';
+  const screenRecording = current.rec.kind === 'local';
+  $('recWatch').querySelector('span').textContent = on ? 'Hide the video' : screenRecording ? 'Watch' : 'Watch with names';
   if (!on) {
     box.hidden = true;
     box.replaceChildren();
@@ -1245,7 +1255,7 @@ function showVideo(on) {
   audio.pause();
   const id = current.id;
   const v = el('video', { controls: true, preload: 'metadata', src: `/rec/${id}/video.mp4` });
-  v.append(el('track', { kind: 'captions', label: 'Speakers', srclang: 'en', src: `/rec/${id}/speakers.vtt`, default: true }));
+  if (!screenRecording) v.append(el('track', { kind: 'captions', label: 'Speakers', srclang: 'en', src: `/rec/${id}/speakers.vtt`, default: true }));
   box.replaceChildren(v);
   box.hidden = false;
 }
@@ -1710,7 +1720,9 @@ function connect() {
 }
 
 // ---------- start ----------
+$('videoSwitch').hidden = $('videoHint').hidden = !NATIVE;
 try {
+  if (NATIVE) $('localVideo').checked = localStorage.getItem('echo.video') === '1';
   const call = localStorage.getItem('echo.call');
   if (call !== null) $('localCall').checked = call === '1';
   const name = localStorage.getItem('echo.name');

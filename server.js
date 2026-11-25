@@ -216,6 +216,19 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
       p.on('error', () => resolve(false));
     });
 
+  // the screen (screen.mp4, from the desktop app) with the full-quality sound (the microphone and the call's sound at
+  // their own rate, not the 16 kHz copy made for the transcriber) into video.mp4; the shorter of the two sets the end
+  const muxVideo = (screen, mic, sys, dst) =>
+    new Promise((resolve) => {
+      const args = ['-hide_banner', '-y', '-i', screen, '-ignore_length', '1', '-i', mic];
+      if (sys) args.push('-ignore_length', '1', '-i', sys, '-filter_complex', '[1:a][2:a]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.89:level=false[a]', '-map', '0:v', '-map', '[a]');
+      else args.push('-map', '0:v', '-map', '1:a');
+      args.push('-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-ac', '1', '-shortest', '-movflags', '+faststart', dst);
+      const p = spawn(ffmpegPath, args, { windowsHide: true });
+      p.on('close', (code) => resolve(code === 0));
+      p.on('error', () => resolve(false));
+    });
+
   function needsExtra(settings) {
     const lang = settings.lang && settings.lang !== 'auto' ? settings.lang : (kokoro.PRESETS.languages.find((l) => l.prefix === String(settings.voice)[0]) || { code: 'en-us' }).code;
     const key = kokoro.extraFor(lang);
@@ -776,7 +789,8 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
         local.set(id, { startedAt: new Date().toISOString(), title: cleanTitle(body.title), mime: String(body.mime || 'audio/webm').slice(0, 80), source: body.source === 'microphone+computer' ? 'microphone+computer' : 'microphone', people: people >= 1 && people <= 20 ? people : null });
         // the desktop app records natively into this folder (mic.wav, system.wav); the browser sends chunks of audio.part
         if (!body.native) fs.writeFileSync(path.join(dir, 'audio.part'), '');
-        return json(res, 200, { id, dir });
+        // ffmpeg: the app's own copy, for the desktop app to encode the screen video with
+        return json(res, 200, { id, dir, ffmpeg: ffmpegPath });
       }
       if (req.method === 'POST' && (m = /^\/api\/local\/([\w-]+)\/chunk$/.exec(p))) {
         if (!local.has(m[1])) return json(res, 404, { error: 'No recording in progress with that id.' });
@@ -794,11 +808,18 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
         const mic = path.join(dir, 'mic.wav');
         const sys = path.join(dir, 'system.wav');
         const has = (f) => fs.existsSync(f) && fs.statSync(f).size > 1024;
+        const screen = path.join(dir, 'screen.mp4');
+        let video = false;
         if (has(mic)) {
           // recorded by the desktop app: the microphone and the computer's sound, mixed here into one track
           const ok = await mixToWav(mic, has(sys) ? sys : null, path.join(dir, 'audio.wav'));
           if (!ok) return json(res, 500, { error: 'Could not mix the recording into audio.wav. The raw files are kept (mic.wav, system.wav).' });
-          for (const f of [mic, sys]) fs.rmSync(f, { force: true });
+          // and the screen, when it was recorded: kept as screen.mp4 if putting it together fails
+          if (has(screen)) {
+            video = await muxVideo(screen, mic, has(sys) ? sys : null, path.join(dir, 'video.mp4'));
+            if (video) fs.rmSync(screen, { force: true });
+          }
+          for (const f of [mic, sys, path.join(dir, 'screen.log')]) fs.rmSync(f, { force: true });
         } else {
           if (!fs.existsSync(part) || fs.statSync(part).size === 0) {
             fs.rmSync(dir, { recursive: true, force: true });
@@ -809,7 +830,7 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
           fs.unlinkSync(part);
         }
         const durationSec = Math.max(0, Number(body.durationMs) || 0) / 1000;
-        fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ kind: 'local', ...(rec.title ? { title: rec.title } : {}), source: rec.source, startedAt: rec.startedAt, durationSec, people: rec.people }, null, 2));
+        fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ kind: 'local', ...(rec.title ? { title: rec.title } : {}), source: rec.source, startedAt: rec.startedAt, durationSec, people: rec.people, ...(video ? { video: true } : {}) }, null, 2));
         let transcribe = null;
         if (body.transcribe !== false) {
           try { transcribe = await startTranscription(m[1], {}); } catch (e) { transcribe = { error: e.message }; }
@@ -888,17 +909,22 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
       const big = (f) => fs.existsSync(f) && fs.statSync(f).size > 4096;
       let ok = false;
       const hadSys = big(sys);
-      if (big(mic)) ok = await mixToWav(mic, hadSys ? sys : null, path.join(dir, 'audio.wav'));
-      else if (big(part)) ok = await toWav(part, path.join(dir, 'audio.wav'));
+      const screen = path.join(dir, 'screen.mp4');
+      let video = false;
+      if (big(mic)) {
+        ok = await mixToWav(mic, hadSys ? sys : null, path.join(dir, 'audio.wav'));
+        // the screen video is written in fragments, so a cut-short one still plays up to its last second
+        if (ok && big(screen) && (video = await muxVideo(screen, mic, hadSys ? sys : null, path.join(dir, 'video.mp4')))) fs.rmSync(screen, { force: true });
+      } else if (big(part)) ok = await toWav(part, path.join(dir, 'audio.wav'));
       if (!ok) continue;
-      for (const f of [mic, sys, part]) fs.rmSync(f, { force: true });
+      for (const f of [mic, sys, part, path.join(dir, 'screen.log')]) fs.rmSync(f, { force: true });
       let durationSec = 0;
       try {
         const w = require('./lib/wav').read(path.join(dir, 'audio.wav'));
         durationSec = w.samples.length / w.rate;
       } catch {}
       const started = /^(\d{4}-\d\d-\d\d)-(\d\d)-(\d\d)-(\d\d)/.exec(d.name);
-      const meta = { kind: 'local', source: hadSys ? 'microphone+computer' : 'microphone', startedAt: started ? `${started[1]}T${started[2]}:${started[3]}:${started[4]}Z` : null, durationSec, rescued: true };
+      const meta = { kind: 'local', source: hadSys ? 'microphone+computer' : 'microphone', startedAt: started ? `${started[1]}T${started[2]}:${started[3]}:${started[4]}Z` : null, durationSec, rescued: true, ...(video ? { video: true } : {}) };
       if (!fs.existsSync(path.join(dir, 'meta.json'))) fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2));
       console.log('Rescued an interrupted recording: ' + d.name);
       broadcast();

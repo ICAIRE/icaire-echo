@@ -76,6 +76,15 @@ jobs:
           $app = "$env:LOCALAPPDATA\ICAIRE Echo"
           $main = Get-ChildItem $app -Filter '*.exe' | Where-Object { $_.Name -notlike 'uninstall*' } | Select-Object -First 1
           if (-not $main) { throw "not installed in $app" }
+          # screen video (desktop/src/video.rs): 10 s with a 2 s pause, through the app's own ffmpeg; about 8 s of video
+          $ff = Get-ChildItem "$app\stage" -Recurse -Filter 'ffmpeg.exe' | Select-Object -First 1
+          if (-not $ff) { throw 'ffmpeg was not found inside the app' }
+          $vt = Join-Path $env:RUNNER_TEMP 'video-test'
+          $v = Start-Process $main.FullName -ArgumentList '--video-test', $vt, $ff.FullName, '10' -Wait -PassThru
+          if ($v.ExitCode -ne 0) { throw "the screen video test failed ($($v.ExitCode))" }
+          $probe = & $ff.FullName -hide_banner -i (Join-Path $vt 'screen.mp4') 2>&1 | Out-String
+          Write-Host $probe
+          if ($probe -notmatch 'Duration: 00:00:0([7-9])') { throw 'the screen video is not about 8 s long' }
           $env:MRB_NO_AUTO_UPDATE = '1'
           $p = Start-Process $main.FullName -PassThru
           $ok = $false
