@@ -322,5 +322,19 @@
   "lang": "en",
   "voice": "heart",
   "intensity": 0.5
+ },
+ "samples": {
+  "en": "Hello, and welcome. This is how I sound when I read your script.",
+  "ar": "مرحباً بكم. هكذا يبدو صوتي عندما أقرأ النص.",
+  "fr": "Bonjour et bienvenue. Voici ma voix quand je lis votre texte.",
+  "es": "Hola y bienvenidos. Así suena mi voz cuando leo su guion.",
+  "de": "Hallo und willkommen. So klingt meine Stimme, wenn ich Ihren Text lese.",
+  "it": "Ciao e benvenuti. Ecco come suona la mia voce quando leggo il vostro testo.",
+  "pt": "Olá e bem-vindos. É assim que a minha voz soa quando leio o seu texto.",
+  "hi": "नमस्ते और स्वागत है। जब मैं आपकी स्क्रिप्ट पढ़ती हूँ तो मेरी आवाज़ ऐसी लगती है।",
+  "tr": "Merhaba ve hoş geldiniz. Metninizi okurken sesim böyle duyulur.",
+  "ru": "Здравствуйте и добро пожаловать. Так звучит мой голос, когда я читаю ваш текст.",
+  "zh": "你好，欢迎。这就是我朗读你的稿子时的声音。",
+  "ja": "こんにちは、ようこそ。これが原稿を読むときの私の声です。"
  }
 }

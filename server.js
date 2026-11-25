@@ -237,7 +237,10 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
         let text = '';
         try { text = fs.readFileSync(path.join(dir, 'script.txt'), 'utf8'); } catch {}
         const files = fs.readdirSync(dir).filter((x) => /^voice\./.test(x)).map((x) => ({ name: x, bytes: fs.statSync(path.join(dir, x)).size }));
-        return { id: d.name, preset: st.preset || '', voice: st.settings ? st.settings.voice : '', speed: st.settings ? st.settings.speed : null, duration: ln.duration || 0, lang: ln.lang || '', preview: text.slice(0, 240), words: text.split(/\s+/).filter(Boolean).length, files };
+        const S = st.settings || {};
+        const x = S.engine === 'expressive' ? { ...chatterbox.CFG.defaults, ...(S.expressive || {}) } : null;
+        const xv = x && chatterbox.findVoice(x.voice);
+        return { id: d.name, preset: st.preset || '', engine: x ? 'expressive' : 'standard', voiceName: x ? (xv ? xv.name : x.voice) : '', voice: st.settings ? st.settings.voice : '', speed: st.settings ? st.settings.speed : null, duration: ln.duration || 0, lang: ln.lang || '', preview: text.slice(0, 240), words: text.split(/\s+/).filter(Boolean).length, files };
       })
       .filter((v) => v.files.length)
       .sort((a, b) => b.id.localeCompare(a.id));
@@ -624,6 +627,27 @@ function createServer({ outRoot = path.join(DATA, 'recordings'), voiceRoot = pat
         expressiveSetup.cancel();
         broadcast();
         return json(res, 200, expressiveSetup.snapshot());
+      }
+      // a short sample of an Expressive voice in a language, made once and kept (about 8 s the first time)
+      if (req.method === 'POST' && p === '/api/expressive/sample') {
+        if (!chatterbox.installed()) return json(res, 400, { error: 'Expressive is not downloaded yet.', needsExpressive: true });
+        const body = await readBody(req);
+        const lang = String(body.lang || 'en');
+        const text = chatterbox.CFG.samples[lang];
+        if (!text) return json(res, 400, { error: 'There is no sample for this language yet; make a short voice-over to hear it.' });
+        const v = chatterbox.findVoice(body.voice);
+        if (!v) return json(res, 400, { error: 'There is no such voice.' });
+        const d = await voiceDetect();
+        const settings = kokoro.settingsFor('presenter', { engine: 'expressive', expressive: { lang, voice: v.id, intensity: 0.5 }, music: { on: false } });
+        const key = 'x-' + kokoro.sampleKey({ x: 2, voice: v.id, own: v.own ? v.createdAt : 0 }, lang + text);
+        const dir = path.join(kokoro.CACHE, 'samples', key);
+        const pick = () => (fs.existsSync(dir) ? fs.readdirSync(dir).find((x) => /^voice.(mp3|m4a)$/.test(x)) : null);
+        if (pick()) return json(res, 200, { url: '/vo-sample/' + key + '/' + pick() });
+        if (voiceJob && voiceJob.active) return json(res, 409, { error: 'A voice-over is being made. Try the sample when it is done.' });
+        const sj = new kokoro.VoiceJob({ id: 'sample-' + key, text, preset: 'presenter', settings, outDir: dir, modelDir: d.modelDir, sample: true });
+        await sj.run();
+        if (sj.status !== 'done') return json(res, 500, { error: sj.error || 'Could not make the sample.' });
+        return json(res, 200, { url: '/vo-sample/' + key + '/' + (pick() || 'voice.wav') });
       }
       // a voice from a recording: the audio file is the body; ?name= and ?consent=1 (the speaker agreed to it)
       if (req.method === 'POST' && p === '/api/expressive/voices') {

@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Voice-overs · ICAIRE Echo · Script mode</title>
+<link rel="stylesheet" href="../../../ui/style.css"><style>
+body { font-variant-numeric: tabular-nums; }
+.studio > * { min-width: 0; }
+main { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; padding: 30px 28px; }
+.inspector { display: flex; flex-direction: column; gap: 14px; }
+.inspector > *, #settings > * { flex-shrink: 0; }
+#settings, .voice-list { display: flex; flex-direction: column; min-height: 0; }
+.inspector #settings, #settings .voice-list { flex: 0 1 auto; }
+.choices { min-height: 48px; overflow: auto; }
+.rail h2 { margin-bottom: 18px; }
+.head p { margin: 0; }
+.editor > * { flex-shrink: 0; }
+.editor .actions { order: 4; padding: 0 16px 12px; }
+.take > span, #playingTitle { min-width: 0; overflow-wrap: anywhere; }
+h2,.label{font-size:15px;font-weight:650;margin:0}h2,.line,.row,.head,.actions,.foot{display:flex;align-items:center;gap:9px}.row,.head,.actions,.foot{justify-content:space-between}.head,.actions{flex-wrap:wrap}.section{margin:0}.voice-list,#strength{margin-top:12px}.fieldname,small,.hint{font-size:12px;color:var(--muted)}.fieldname{display:block;margin-bottom:7px}.hint{line-height:1.5;margin-block:8px}select,progress,input[type=range]{width:100%}button{white-space:normal}.choice,.take{width:100%;display:flex;text-align:start;justify-content:flex-start;background:var(--card);border-color:var(--edge);padding:11px 12px}.choice{height:48px;margin-bottom:4px}.choice[aria-pressed=true],button[aria-pressed=true]{border-color:var(--lime);background:#1a352f}.choice b,.take b{display:block;font-size:14px}.choice small,.take small{display:block}.sig{display:flex;align-items:center;gap:2px;height:24px;color:var(--faint)}.sig i{display:block;width:2px;background:currentColor;border-radius:2px}.choice[aria-pressed=true] .sig{color:var(--accent)}.box,.editor,dialog{background:var(--card);border:1px solid var(--edge);border-radius:12px}.box{padding:16px}.editor{display:flex;flex-direction:column;flex:1;min-height:180px;overflow:auto}.tools,.editorfoot{padding:12px 17px}.tools{border-bottom:1px solid var(--edge)}.editorfoot{border-top:1px solid var(--edge);font-size:12px;color:var(--muted)}textarea#draft{background:var(--field);border:0;border-radius:0;flex:1;resize:none;width:100%;min-height:76px;padding:14px 16px;font-size:14px;line-height:1.7}textarea#draft:focus-visible{outline-offset:-3px}.take{height:90px;display:grid;gap:1px;margin-bottom:8px}.take b,.take small{white-space:nowrap;text-overflow:ellipsis;overflow:hidden}.take .sig{height:16px;color:#92aca2;overflow:hidden}.foot{grid-column:1/-1;background:var(--bar);border-top:1px solid var(--edge);padding:0 16px;color:var(--muted);font-size:11px}.dot{color:var(--accent)}.segment{display:flex;gap:5px;flex-wrap:wrap}.segment button{flex:1}.section+.section{border-top:1px solid var(--edge);padding-top:12px}.take:focus-visible,.choice:focus-visible{outline-offset:0}.secondary{width:100%;margin-top:8px;font-size:12px}dialog{color:var(--text);padding:24px;width:min(430px,92vw);max-height:85dvh}dialog::backdrop{background:#091820cf}dialog label{display:block;margin:14px 0}dialog input:not([type=checkbox]){width:100%}progress{accent-color:var(--lime);height:7px}.statusbox{display:grid;gap:8px}.player{padding:12px;background:var(--card);border:1px solid var(--edge);border-radius:10px}.player input{flex:1;min-width:40px}.compact{margin:0}.modebtn{font-size:12px}.studio[data-layout=c] .choice{border-radius:5px}
+
+@media (min-width:1151px) {
+  #app { grid-template-columns:250px minmax(0,1fr) 286px; }
+}
+@media (min-width:900px) and (max-height:740px) {
+  .choice { height:40px; padding:3px 8px; margin-bottom:3px; }
+  .segment button, .modebtn { padding:5px 8px; min-height:32px; font-size:12px; }
+  .inspector .hint { margin:4px 0; }
+  .voice-list, #strength { margin-top:8px; }
+  .inspector .secondary { min-height:32px; padding:4px 8px; }
+}
+@media (min-width:900px) and (max-width:1100px) {
+  #app { grid-template-columns:210px minmax(0,1fr) 236px; grid-template-rows:64px minmax(0,1fr) 28px; }
+  .inspector { max-height:none; border-bottom:0; gap:10px; }
+  .rail { grid-area:2 / 3; border-right:0; border-left:1px solid var(--edge); }
+  main { padding:20px 18px; gap:12px; }
+  .head p { font-size:12px; }
+}
+@media (min-width:701px) and (max-width:899px) {
+  #app { grid-template-rows:64px minmax(0,3fr) minmax(0,2fr) 28px; }
+  .inspector { max-height:none; }
+  main { grid-row:2 / 4; padding:18px; }
+}
+@media (max-width:700px) {
+  main { grid-area:2 / 1; padding:18px; }
+  .editor { min-height:360px; }
+  .foot { grid-row:5; }
+}
+.source { margin-top:auto; }
+.source h2 { margin-bottom:8px; }
+.segment { flex-wrap:nowrap; }
+.head .segment { width:200px; }
+.segment button { font-size:12px; padding:5px 8px; min-height:32px; }
+.tools { position:relative; }
+#insert[aria-expanded=true] { color:var(--lime); border-color:var(--lime); }
+#tagPanel {
+  position:fixed; z-index:5; padding:12px; overflow:auto;
+  background:var(--card); border:1px solid var(--field-line); border-radius:10px;
+}
+#tagGroups { display:grid; grid-auto-columns:minmax(0,1fr); grid-auto-flow:column; }
+.tag-group { min-width:0; padding-inline:6px; }
+.tag-group + .tag-group { border-inline-start:1px solid var(--edge); }
+.tag-group h3 { margin:2px 6px 7px; color:var(--muted); font-size:12px; }
+.tag-group button {
+  width:100%; justify-content:flex-start; min-height:26px; border:0;
+  border-radius:4px; padding:4px 6px; font-size:13px; text-align:start; overflow-wrap:anywhere;
+}
+.tag-group button:focus-visible { outline-offset:-2px; }
+#tagHint:not(:empty) { display:block; margin:10px 6px 0; color:var(--muted); }
+.voice-tools { grid-template-columns:minmax(0,1fr); }
+.voice-list { max-height:none; padding:0; }
+.choice > span:last-child { min-width:0; }
+.choice b { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#customActions { display:grid; gap:4px; }
+.choice { height:auto; min-height:40px; }
+.recorded-row { display:flex; align-items:center; gap:4px; }
+.recorded-row .choice { flex:1; min-width:0; }
+.delete-prompt { display:flex; flex-wrap:wrap; align-items:center; gap:4px; padding:4px; }
+.delete-prompt span { flex-basis:100%; overflow-wrap:anywhere; }
+.statusbox { font-size:13px; }
+.download-progress { min-height:28px; }
+#job { flex:1; min-width:130px; }
+.actions { min-height:52px; }
+#selection { overflow-wrap:anywhere; }
+.rail { display:flex; flex-direction:column; }
+#history { flex:1; min-height:0; overflow:auto; }
+.take { grid-template-columns:minmax(0,1fr) auto; align-content:center; }
+.take .sig { grid-column:1 / -1; }
+.take[aria-current=true] { border-color:var(--lime); }
+.player { margin-top:10px; }
+.player .line { gap:4px; }
+.player #time { white-space:nowrap; }
+#playingTitle { font-size:13px; }
+@media (max-width:700px) {
+  #history { max-height:340px; flex:auto; }
+  .source { margin-top:10px; }
+}
+</style></head><body><div id="app" class="studio" data-layout="b"><header class="topbar"><span class="brand"><img src="../../../ui/echo-mark.svg" alt=""><span>ICAIRE <b>Echo</b></span></span><nav class="views" aria-label="Sections"><span class="view-link"><i data-icon="mic"></i>Record</span><span class="view-link" aria-current="page"><i data-icon="voices"></i>Voice-overs</span></nav><details class="app-menu"><summary><i data-icon="settings"></i>More</summary><nav aria-label="More"><span class="menu-item"><i data-icon="storage"></i>Models and storage</span><span class="menu-item"><i data-icon="files"></i>Open recordings folder</span></nav></details></header>
+<aside class="inspector"><h2><i data-icon="voices"></i>Voice</h2>
+<section class="box statusbox" id="setup" hidden>
+<h2>Set up Expressive</h2><p>Arabic, stronger emotion, English sounds and voices from recordings.</p>
+<p class="hint">Download 1.5 GB once. Works offline, at about real time.</p>
+<button class="primary" id="download">Download Expressive</button>
+<div class="download-progress"><progress id="transfer" max="100" value="0" hidden aria-label="Download progress"></progress><small id="downloadStatus"></small></div>
+</section><div class="section" id="settings"><label class="fieldname" for="language">Language</label><div class="voice-tools"><select id="language"></select><label class="search-field"><i data-icon="search"></i><input id="search" type="search" placeholder="Search" aria-label="Search voices"></label></div><div class="voice-list"><span class="fieldname" id="voiceCaption">Ready voices</span><div class="choices" id="choices"></div><small id="noMatches" hidden>No matching voices</small><div id="customActions" hidden><button class="secondary" id="addVoice"><i data-icon="mic"></i>Make a voice from a recording</button></div></div><div id="strength" hidden><label for="intensity">Emotion intensity</label><input type="range" id="intensity" value="50"><div class="row"><small>Calm</small><small>Dramatic</small></div></div></div></aside>
+<main><header class="head"><div><div class="head"><h1 class="view-heading">Turn a script into a voice-over</h1><div class="segment" role="group" aria-label="Voice engine"><button data-engine="Standard">Standard</button><button data-engine="Expressive">Expressive</button></div></div><p class="hero-subtitle">Everything stays on this computer.</p></div></header>
+<section class="editor"><div class="tools row"><label for="draft" class="label">Script</label>
+<button class="small" id="insert" aria-expanded="false" aria-controls="tagPanel" title="Insert a tag (or type [ in the script)"><i data-icon="plus"></i>Insert tag</button>
+<div id="tagPanel" hidden role="group" aria-label="Insert a script tag"><div id="tagGroups"></div><small id="tagHint"></small></div></div>
+<textarea id="draft" spellcheck="false"></textarea><div class="editorfoot row"><span id="wordCount"></span><span id="engineText"></span></div>
+<div class="actions"><button class="primary" id="create"><i data-icon="waves"></i>Create voice-over</button><small id="selection"></small><div id="job" role="status" hidden><div class="row"><b>Making voice-over</b><small id="eta"></small></div><progress max="100" value="0" id="renderProgress" aria-label="Voice-over progress"></progress></div></div></section>
+</main>
+<aside class="rail"><h2><i data-icon="waves"></i>Your voice-overs</h2><span class="fieldname">Recent</span><div id="history"></div><div class="player" id="player" hidden><div class="row"><b id="playingTitle"></b><button class="icon-button" id="closePlayer" aria-label="Close player"><i data-icon="close"></i></button></div><div class="line"><button class="icon-button" id="play" aria-label="Play preview"><i data-icon="play"></i></button><input id="seek" type="range" value="0" aria-label="Playback position"><small id="time"></small></div></div></aside><footer class="foot"><span><span class="dot">●</span> Transcriber ready</span><span>Saved on this computer</span></footer></div>
+<dialog id="voiceDialog" aria-labelledby="recordTitle"><form id="voiceForm"><h2 id="recordTitle">Make a voice from a recording</h2><p class="hint">Choose a clear 10–30 second clip of one person speaking.</p><label>Recording<input type="file" accept="audio/*" id="clip" required></label><label>Voice name<input id="voiceName" required maxlength="35"></label><label><input type="checkbox" required> The speaker agreed to have their voice copied.</label><div class="line"><button class="primary">Add voice</button><button type="button" onclick="this.closest('dialog').close()">Cancel</button></div></form></dialog>
+<script src="../../../ui/icons.js"></script><script>'use strict';
+const $ = id => document.getElementById(id);
+const lastVoice = new Map();
+const standardLanguages = ['English','French','Hindi','Italian','Japanese','Mandarin','Portuguese','Spanish'];
+const expressiveLanguages = ['English','Arabic','Danish','Dutch','Finnish','French','German','Greek','Hebrew','Hindi','Italian','Japanese','Korean','Malay','Norwegian','Polish','Portuguese','Russian','Spanish','Swahili','Swedish','Turkish','Mandarin'];
+const drafts = {English:'Welcome to the ICAIRE open studio.\n\nToday we’ll hear from the people building tools for the next generation of researchers. Take a seat, and let’s begin.',Arabic:'أهلاً بكم في الاستوديو المفتوح.\n\nنستمع اليوم إلى الباحثين وهم يروون قصصهم ويعرضون أفكارهم الجديدة. لنبدأ معاً.'};
+const samples = {English:[['Heart','Warm narration'],['Bella','Bright narration'],['Michael','Measured narration']],French:[['Siwis','French narration']],Hindi:[['Alpha','Hindi narration']],Italian:[['Sara','Italian narration']],Japanese:[['Alpha','Japanese narration']],Mandarin:[['Xiaobei','Mandarin narration']],Portuguese:[['Dora','Portuguese narration']],Spanish:[['Dora','Spanish narration']]};
+let engine='Standard', installed=false, language='English', chosen='Heart', transferTimer, making=false;
+const readyVoices = [
+  ['Heart','Warm, female, American'],
+  ['Bella','Bright, female, American'],
+  ['Emma','Clear, female, British'],
+  ['Michael','Steady, male, American'],
+  ['Fenrir','Deep, male, American'],
+  ['George','Measured, male, British']
+];
+const recorded=['Maha'];
+const lastLanguage={Standard:'English',Expressive:'Arabic'};
+const sounds=['Laugh','Chuckle','Sigh','Gasp','Cough','Groan','Sniff','Shush','Clear throat'];
+const moods=['Angry','Happy','Sad','Excited','Surprised','Calm','Serious','Whisper','Shouting','Normal'];
+const isExpressive=()=>engine==='Expressive';
+const ready=()=>!isExpressive()||installed;
+const voices=()=>isExpressive()?[...readyVoices,...recorded.map(name=>[name,'From a recording'])]:samples[language];
+function signal(seed,count){
+  const wave=document.createElement('span');
+  wave.className='sig'; wave.setAttribute('aria-hidden','true');
+  for(let i=0;i<count;i++){
+    const bar=document.createElement('i');
+    bar.style.height=(3+Math.abs(Math.sin(i*2.1+seed)*Math.cos(i*.27+seed))* (count>12?13:21))+'px';
+    wave.append(bar);
+  }
+  return wave;
+}
+function caption(parent,name,description){
+  const span=document.createElement('span'), b=document.createElement('b'), small=document.createElement('small');
+  b.textContent=name;small.textContent=description;span.append(b,small);parent.append(span);
+}
+function recordedRow(choice,name) {
+  const row = document.createElement('div');
+  row.className = 'recorded-row';
+  const trash = document.createElement('button');
+  trash.className = 'icon-button';
+  trash.setAttribute('aria-label','Delete '+name);
+  trash.append(window.icon('trash'));
+  row.append(choice,trash);
+  trash.onclick = ()=>{
+    const prompt = document.createElement('span');
+    prompt.textContent = 'Delete '+name+'?';
+    const cancel = document.createElement('button');
+    cancel.textContent = 'Cancel';
+    cancel.onclick = ()=>{
+      row.className = 'recorded-row';
+      row.replaceChildren(choice,trash);
+      trash.focus();
+    };
+    const remove = document.createElement('button');
+    remove.textContent = 'Delete';
+    remove.setAttribute('aria-label','Confirm deletion of '+name);
+    remove.onclick = ()=>{
+      recorded.splice(recorded.indexOf(name),1);
+      if (chosen===name) chosen=readyVoices[0][0];
+      render();
+      $('addVoice').focus();
+    };
+    row.className = 'delete-prompt';
+    row.replaceChildren(prompt,cancel,remove);
+    cancel.focus();
+  };
+  return row;
+}
+function renderVoices(){
+  $('choices').replaceChildren();
+  voices().forEach(([name,description],i)=>{
+    if (!(name+' '+description).toLowerCase().includes($('search').value.trim().toLowerCase())) return;
+    const b=document.createElement('button');b.className='choice';
+    b.setAttribute('aria-pressed',chosen===name);
+    b.append(signal(i+1,8));caption(b,name,description);b.onclick=()=>{chosen=name;renderVoices();$('choices').querySelector('[aria-pressed=true]').focus({preventScroll:true});};
+    $('choices').append(isExpressive() && recorded.includes(name) ? recordedRow(b,name) : b);
+  });
+  $('noMatches').hidden=!!$('choices').childElementCount;
+  $('selection').textContent=ready()?chosen+' · '+language:'Expressive needs a download';
+  $('voiceCaption').textContent=isExpressive()?'Available voices':'Ready voices';
+
+}
+function metrics(){
+  const words=$('draft').value.replace(/\[[^\]]*\]/g,' ').trim().split(/\s+/).filter(Boolean).length;
+  $('wordCount').textContent=words+' words · about '+Math.ceil(words/2.5)+' s';
+  $('create').disabled=!ready()||!words||making;
+}
+function showDraft(){
+  $('draft').value=drafts[language]||'';
+  $('draft').dir=['Arabic','Hebrew'].includes(language)?'rtl':'ltr';
+  $('draft').lang=({Arabic:'ar',English:'en',Hebrew:'he'})[language]||'';
+  $('draft').placeholder='Write or paste your script';metrics();
+}
+function render(){
+  $('search').value='';
+  document.querySelectorAll('[data-engine]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.engine===engine));
+  $('setup').hidden=ready();$('settings').hidden=!ready();
+  $('customActions').hidden=!isExpressive();
+  $('strength').hidden=!isExpressive() || language==='English';
+  $('create').hidden=!ready();$('insert').disabled=!ready();
+  $('engineText').textContent=engine;
+  $('language').replaceChildren(...(isExpressive()?expressiveLanguages:standardLanguages).map(l=>new Option(l,l)));
+  $('language').value=language;
+  $('search').closest('label').hidden=voices().length<=6;
+  renderVoices();metrics();
+}
+
+function cancelDownload(){
+  clearInterval(transferTimer);transferTimer=null;$('transfer').hidden=true;$('download').textContent='Download Expressive';$('downloadStatus').textContent='';$('download').className='primary';
+}
+function rememberedVoice() {
+  const saved = lastVoice.get(engine+language);
+  return voices().find(([name])=>name===saved)?.[0] || voices()[0][0];
+}
+function pickEngine(next){
+  if(next===engine)return;
+  if(ready()) lastVoice.set(engine+language,chosen);
+  cancelDownload();closeTags();engine=next;
+  language=ready()?lastLanguage[engine]:language;
+  chosen=rememberedVoice();
+  showDraft();render();
+}
+document.querySelectorAll('[data-engine]').forEach(b=>b.onclick=()=>pickEngine(b.dataset.engine));
+$('download').onclick=()=>{
+  if(transferTimer){cancelDownload();return}
+  $('download').textContent='Cancel download';$('download').className='';$('transfer').value=0;$('transfer').hidden=false;$('downloadStatus').textContent='0% of 1.5 GB';
+  transferTimer=setInterval(()=>{
+    $('transfer').value+=5;$('downloadStatus').textContent=$('transfer').value+'% of 1.5 GB';
+    if($('transfer').value>=100){cancelDownload();installed=true;language='Arabic';chosen=recorded[0];showDraft();render();}
+  },250);
+};
+$('search').oninput=renderVoices;
+$('language').onchange=e=>{
+  lastVoice.set(engine+language,chosen);
+  language=e.target.value;
+  lastLanguage[engine]=language;
+  chosen=rememberedVoice();
+  closeTags();showDraft();render();
+};
+$('draft').oninput=()=>{drafts[language]=$('draft').value;metrics();};
+$('addVoice').onclick=()=>{$('voiceForm').reset();$('voiceName').setCustomValidity('');$('voiceDialog').showModal();};
+$('voiceName').oninput=()=>$('voiceName').setCustomValidity('');
+$('voiceForm').onsubmit=e=>{
+  e.preventDefault();const name=$('voiceName').value.trim();
+  if(!name||voices().some(([v])=>v.toLowerCase()===name.toLowerCase())||/[\[\]]/.test(name)){
+    $('voiceName').setCustomValidity('Choose a distinct name without brackets.');$('voiceName').reportValidity();return;
+  }
+  recorded.push(name);chosen=name;$('voiceDialog').close();render();
+};
+const draft = $('draft');
+const panel = $('tagPanel');
+let queryStart = null;
+function closeTags() {
+  panel.hidden = true;
+  queryStart = null;
+  $('insert').setAttribute('aria-expanded','false');
+}
+function insertTag(group, item) {
+  const start = queryStart ?? draft.selectionStart;
+  const end = draft.selectionEnd;
+  const selected = queryStart === null ? draft.value.slice(start,end) : '';
+  let tag = item.toLowerCase();
+  if (group === 'Pause') tag = 'pause '+item.replace('½','0.5').replace(' ','');
+  if (group === 'Voice') tag = 'voice '+item;
+  const mark = '['+tag+']';
+  const wraps = selected && (group === 'Voice' || (group === 'Mood' && item !== 'Normal'));
+  const text = wraps ? mark+selected+'[/'+tag.split(' ')[0]+']' : mark;
+  closeTags();
+  draft.focus({preventScroll:true});
+  // A point cue goes before highlighted words. A mood or voice surrounds them.
+  const replaceEnd = selected && !wraps ? start : end;
+  const before = draft.value[start-1] || '';
+  const after = draft.value[replaceEnd] || '';
+  const leading = /\S/.test(before) ? ' ' : '';
+  const trailing = /\s/.test(after) ? '' : ' ';
+  draft.setRangeText(leading+text+trailing,start,replaceEnd,'end');
+  if (after===' ') {
+    const caret = draft.selectionEnd+1;
+    draft.setSelectionRange(caret,caret);
+  }
+  draft.dispatchEvent(new Event('input',{bubbles:true}));
+}
+function positionTags() {
+  if (panel.hidden) return;
+  const anchor = $('insert').getBoundingClientRect();
+  const card = document.querySelector('.editor').getBoundingClientRect();
+  const width = Math.min(480, card.width-16, innerWidth-16);
+  panel.style.width = width+'px';
+  panel.style.left = Math.max(8,Math.min(innerWidth-width-8,anchor.right-width))+'px';
+  const below = innerHeight-anchor.bottom-12;
+  const above = anchor.top-12;
+  const up = below < panel.scrollHeight+2 && above > below;
+  panel.style.maxHeight = Math.max(80,up ? above : below)+'px';
+  panel.style.top = (up ? anchor.top-panel.offsetHeight-4 : anchor.bottom+4)+'px';
+}
+function openTags(query='') {
+  const soundItems = isExpressive() ? (language==='English' ? sounds : []) : ['Laugh','Sigh','Breath'];
+  const groups = {Pause:['½ s','1 s','2 s','4 s'], Mood:moods, Sound:soundItems, Voice:voices().map(([name])=>name)};
+  const container = $('tagGroups');
+  container.replaceChildren();
+  for (const [group,items] of Object.entries(groups)) {
+    const matches = items.filter(item=>(group+' '+item).toLowerCase().includes(query.toLowerCase()));
+    if (!matches.length) continue;
+    const section = document.createElement('section');
+    section.className = 'tag-group';
+    const heading = document.createElement('h3');
+    heading.textContent = group;
+    section.append(heading);
+    for (const item of matches) {
+      const button = document.createElement('button');
+      button.textContent = item;
+      button.onclick = ()=>insertTag(group,item);
+      section.append(button);
+    }
+    container.append(section);
+  }
+  $('tagHint').textContent = !container.childElementCount ? 'No matching tags' :
+    isExpressive() ? '' : 'Standard approximates moods and sounds.';
+  panel.hidden = false;
+  $('insert').setAttribute('aria-expanded','true');
+  positionTags();
+}
+$('insert').onclick = ()=>{
+  if (!panel.hidden) { closeTags(); draft.focus(); return; }
+  openTags();
+  panel.querySelector('button').focus({preventScroll:true});
+};
+draft.addEventListener('input',event=>{
+  if (!ready() || event.isComposing) return;
+  const at = draft.selectionStart-1;
+  const slashCommand = event.data==='/' && (at===0 || /\s/.test(draft.value[at-1]));
+  if (event.data==='[' || slashCommand) queryStart = at;
+  if (queryStart===null) return;
+  const typed = draft.value.slice(queryStart,draft.selectionStart);
+  if (/^[\[/][^\[\]\n/]*$/.test(typed)) openTags(typed.slice(1));
+  else closeTags();
+});
+document.addEventListener('keydown',event=>{
+  if (panel.hidden || event.isComposing) return;
+  const buttons = [...panel.querySelectorAll('button')];
+  if (event.key==='Escape') {
+    event.preventDefault(); closeTags(); draft.focus({preventScroll:true}); return;
+  }
+  if (event.target===draft) {
+    if (event.key==='Enter' && buttons.length) {
+      event.preventDefault(); buttons[0].click();
+    } else if (event.key==='ArrowDown' && buttons.length) {
+      event.preventDefault(); buttons[0].focus();
+    } else if (['ArrowLeft','ArrowRight','ArrowUp','Home','End','Tab'].includes(event.key)) closeTags();
+    return;
+  }
+  if (!buttons.includes(event.target) || !event.key.startsWith('Arrow')) return;
+  const column = event.target.parentElement;
+  const items = [...column.querySelectorAll('button')];
+  const row = items.indexOf(event.target);
+  const adjacent = event.key==='ArrowRight' ? column.nextElementSibling : column.previousElementSibling;
+  event.preventDefault();
+  if (['ArrowRight','ArrowLeft'].includes(event.key)) {
+    if (adjacent) adjacent.querySelectorAll('button')[Math.min(row,adjacent.childElementCount-2)].focus();
+  } else items[(row+(event.key==='ArrowDown'?1:-1)+items.length)%items.length].focus();
+});
+document.addEventListener('pointerdown',event=>{
+  if (!panel.contains(event.target) && !$('insert').contains(event.target)) closeTags();
+});
+document.addEventListener('focusin',event=>{
+  if (event.target===draft && queryStart!==null) return;
+  if (!panel.contains(event.target) && event.target!==$('insert')) closeTags();
+});
+window.addEventListener('resize',positionTags);
+document.addEventListener('scroll',positionTags,true);
+const takes=[['Workshop welcome','Heart',18],['Research briefing','Bella',42],['Closing remarks','Heart',26]];
+let current, playback;
+const clock=s=>Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+function updateHistoryPlayback() {
+  document.querySelectorAll('.take').forEach((button,i)=>{
+    const selected = takes[i]===current && !$('player').hidden;
+    const playing = selected && playback;
+    button.setAttribute('aria-current',String(selected));
+    button.setAttribute('aria-label',(playing?'Pause ':'Play ')+takes[i][0]);
+    button.querySelector('svg').replaceWith(icon(playing?'pause':'play'));
+  });
+}
+function stopPlayback(){clearInterval(playback);playback=null;$('play').replaceChildren(icon('play'));$('play').setAttribute('aria-label','Play preview');updateHistoryPlayback();}
+function showTake(t){
+  stopPlayback();current=t;
+  $('playingTitle').textContent=t[0];$('player').hidden=false;$('seek').max=t[2];$('seek').value=0;$('seek').oninput();updateHistoryPlayback();
+}
+$('seek').oninput=()=>{$('time').textContent=clock(+$('seek').value)+' / '+clock(current[2]);};
+$('play').onclick=()=>{
+  if(playback){stopPlayback();return;}
+  if(+$('seek').value>=current[2])$('seek').value=0;
+  $('play').replaceChildren(icon('pause'));$('play').setAttribute('aria-label','Pause preview');
+  playback=setInterval(()=>{$('seek').value=+$('seek').value+1;$('seek').oninput();if(+$('seek').value>=current[2])stopPlayback();},1000);
+  updateHistoryPlayback();
+};
+function closePlayer(){
+  $('player').hidden=true;
+  stopPlayback();
+}
+$('closePlayer').onclick=()=>{
+  const row=$('history').children[takes.indexOf(current)];
+  closePlayer();
+  row?.focus({preventScroll:true});
+};
+function historyList(){
+  $('history').replaceChildren(...takes.map((t,i)=>{
+    const b=document.createElement('button');b.className='take';caption(b,t[0],t[1]+' · '+clock(t[2]));b.append(icon('play'),signal(i+2,32));b.setAttribute('aria-label','Play '+t[0]);b.onclick=()=>{
+      if(current!==t || $('player').hidden) showTake(t);
+      $('play').click();
+    };return b;
+  }));
+}
+$('create').onclick=()=>{
+  const plain=$('draft').value.replace(/\[[^\]]*\]/g,'').trim();
+  const duration=Math.max(1,Math.ceil(plain.split(/\s+/).length/2.5));
+  const take=[plain.split(/\s+/).slice(0,6).join(' '),chosen,duration];
+  const total=isExpressive()?duration:Math.max(2,Math.ceil(duration/4));let remaining=total;
+  making=true;$('selection').hidden=true;metrics();closeTags();closePlayer();$('job').hidden=false;$('renderProgress').value=0;
+  $('eta').textContent='About '+clock(remaining)+' left';
+  const timer=setInterval(()=>{
+    remaining--;$('eta').textContent='About '+clock(remaining)+' left';$('renderProgress').value=100*(1-remaining/total);
+    if(remaining<=0){clearInterval(timer);making=false;$('selection').hidden=false;takes.unshift(take);historyList();$('job').hidden=true;showTake(take);metrics();}
+  },1000);
+};
+showDraft();render();historyList();</script></body></html>
