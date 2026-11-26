@@ -1807,7 +1807,7 @@ dependencies = [
 
 [[package]]
 name = "icaire-echo"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "cpal",
  "dirs 5.0.1",

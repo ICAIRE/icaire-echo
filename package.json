@@ -1,6 +1,6 @@
 {
   "name": "icaire-echo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "ICAIRE Echo: record meetings and get transcripts with names, and make voice-overs, all on your own computer.",
   "main": "server.js",
   "scripts": {
