@@ -60,7 +60,11 @@ if (-not (Get-ChildItem "$Stage\app\bin" -Recurse -Filter 'whisper-cli.exe')) { 
 
 # 5. the desktop app around it (Tauri), with the version from package.json
 Push-Location "$Repo\desktop"
-& npx tauri build --bundles nsis --config "{\`"version\`":\`"$Version\`"}"
+# the version goes in a small JSON file: PowerShell 7 passes quotes inside an argument through literally, so inline JSON
+# reached Tauri as {\"version\":...} and failed to parse
+$VersionConfig = Join-Path $Work 'version.json'
+[IO.File]::WriteAllText($VersionConfig, '{"version":"' + $Version + '"}')
+& npx tauri build --bundles nsis --config $VersionConfig
 if ($LASTEXITCODE -ne 0) { throw 'the desktop app did not build' }
 Pop-Location
 $exe = Get-ChildItem "$Repo\desktop\target\release\bundle\nsis\*.exe" | Select-Object -First 1
