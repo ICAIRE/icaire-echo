@@ -101,6 +101,8 @@ jobs:
           Start-Process "$app\uninstall.exe" -ArgumentList '/S' -Wait
           Start-Sleep 3
           if (Test-Path $main.FullName) { throw 'the uninstaller left the app behind' }
+          # every check above throws on failure; the ffmpeg probe (no output file) leaves exit code 1 behind on purpose
+          exit 0
       - uses: actions/upload-artifact@v4
         with:
           name: icaire-echo-windows
