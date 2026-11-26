@@ -270,8 +270,8 @@ mod mac_system {
 
     pub fn run(track: Arc<Track>, path: PathBuf, stop: Arc<AtomicBool>, ready: mpsc::Sender<Result<String, String>>) {
         let started = (|| -> Result<SCStream, String> {
-            let denied = "Allow ICAIRE Echo under System Settings › Privacy & Security › Screen & System Audio Recording to record the call, then try again. (Only the sound is recorded.)";
-            let content = SCShareableContent::get().map_err(|e| format!("{denied} ({e})"))?;
+            let denied = "macOS has not allowed ICAIRE Echo to record the call. Open System Settings › Privacy & Security › Screen & System Audio Recording and switch ICAIRE Echo on. If it is already on, switch it off and on again (a new version of the app needs it again), then try again. (Only the sound is recorded.)";
+            let content = SCShareableContent::get().map_err(|_| denied.to_string())?;
             let display = content.displays().into_iter().next().ok_or(denied)?;
             let filter = SCContentFilter::create().with_display(&display).with_excluding_windows(&[]).build().map_err(|e| format!("{e}"))?;
             let config = SCStreamConfiguration::new()

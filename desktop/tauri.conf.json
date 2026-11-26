@@ -35,7 +35,9 @@
     "copyright": "ICAIRE, MIT License",
     "macOS": {
       "minimumSystemVersion": "13.5",
-      "infoPlist": "Info.plist"
+      "infoPlist": "Info.plist",
+      "signingIdentity": "-",
+      "hardenedRuntime": false
     },
     "windows": {
       "nsis": {

@@ -192,8 +192,8 @@ mod source {
         let (tx, rx) = mpsc::channel::<Result<(u32, u32), String>>();
         let t = std::thread::spawn(move || {
             let started = (|| -> Result<(SCStream, (u32, u32)), String> {
-                let denied = "Allow ICAIRE Echo under System Settings › Privacy & Security › Screen & System Audio Recording to record the screen, then try again.";
-                let content = SCShareableContent::get().map_err(|e| format!("{denied} ({e})"))?;
+                let denied = "macOS has not allowed ICAIRE Echo to record the screen. Open System Settings › Privacy & Security › Screen & System Audio Recording and switch ICAIRE Echo on. If it is already on, switch it off and on again (a new version of the app needs it again), then try again.";
+                let content = SCShareableContent::get().map_err(|_| denied.to_string())?;
                 let display = content.displays().into_iter().next().ok_or(denied)?;
                 // points times two: the screen's pixels on a Retina display, scaled down to at most 1920
                 let (w, h) = fit(display.width() * 2, display.height() * 2);
