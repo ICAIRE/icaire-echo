@@ -1036,8 +1036,11 @@ function positionTags() {
   panel.style.top = (up ? anchor.top-panel.offsetHeight-4 : anchor.bottom+4)+'px';
 }
 function openTags(query='') {
-  const soundItems = isExpressive() ? (expressiveLanguage()?.sounds ? sounds : []) : ['Laugh','Sigh','Breath'];
-  const groups = {Pause:['½ s','1 s','2 s','4 s'], Mood:isExpressive() ? [...moods, 'Scared', 'Sarcastic', 'Dramatic', 'Crying'] : moods, Sound:soundItems, Voice:(isExpressive() ? VO.catalog.voices : VO.info.voices).map(v => v.name)};
+  const soundItems = expressiveLanguage()?.sounds ? sounds : [];
+  // Moods and sounds are Expressive's: Standard reads every word in one even voice, so it offers only pauses and voices
+  const groups = isExpressive()
+    ? {Pause:['½ s','1 s','2 s','4 s'], Mood:[...moods, 'Scared', 'Sarcastic', 'Dramatic', 'Crying'], Sound:soundItems, Voice:VO.catalog.voices.map(v => v.name)}
+    : {Pause:['½ s','1 s','2 s','4 s'], Voice:VO.info.voices.map(v => v.name)};
   const container = $('voTagGroups');
   container.replaceChildren();
   for (const [group,items] of Object.entries(groups)) {
@@ -1057,7 +1060,7 @@ function openTags(query='') {
     container.append(section);
   }
   $('voTagHint').textContent = !container.childElementCount ? 'No matching tags' :
-    isExpressive() ? '' : 'Standard approximates moods and sounds.';
+    isExpressive() ? '' : 'Moods and sounds need Expressive.';
   panel.hidden = false;
   $('voInsert').setAttribute('aria-expanded','true');
   positionTags();
